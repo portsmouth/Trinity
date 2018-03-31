@@ -1,0 +1,77 @@
+   
+<body onload="onLoad();">
+
+<script src="../js/thirdparty/jquery-1.11.3.min.js"></script>
+<script src="../js/thirdparty/three/three.min.js"></script>
+<script src="../js/thirdparty/three/libs/stats.min.js"></script>
+<script src="../js/thirdparty/three/libs/dat.gui.min.js"></script>
+<script src="../js/thirdparty/three/controls/OrbitControls.js"></script>
+
+<script src="../js/gl.js"></script>
+<script src="../js/gui.js"></script>
+<script src="../js/shaders.js"></script>
+<script src="../js/solver.js"></script>
+<script src="../js/renderer.js"></script>
+<script src="../js/trinity.js"></script>
+
+<?/* ------------------------------------------------------------------*/?>
+<?/*                   simulation definition                           */?>
+<?/* ------------------------------------------------------------------*/?>
+
+<script>
+
+function Simulation() {}
+Simulation.prototype.init = function(trinity)
+{
+    let renderer  = trinity.getRenderer();
+    let camera    = trinity.getCamera();
+    let controls  = trinity.getControls();
+        
+    /** Camera settings **/
+    gravy.fov = undefined;
+    camera.up.set(0, 1, 0);
+    camera.position.set(-17.285826988238288, 6.6108908219705285, 16.123212867091922);
+    controls.target.set(-0.7202401301707231, -0.9929691039930756, -0.9023969307484403);
+
+    
+}
+
+
+Simulation.prototype.getScale = function()
+{
+    return 1.0;
+}
+
+Simulation.prototype.program = function()
+{
+    return `
+   
+    `;
+}
+
+Simulation.prototype.syncProgram = function(gravy, program) 
+{ 
+
+}
+
+Simulation.prototype.getName = function() { return ''; }
+Simulation.prototype.getURL = function() { return ''; }
+
+Simulation.prototype.initGui = function(gui) 
+{ 
+
+}
+
+</script>
+
+
+<?/* ------------------------------------------------------------------*/?>
+<?/*                            main loop                              */?>
+<?/* ------------------------------------------------------------------*/?>
+
+<script type="text/javascript">
+function onLoad() { trinity = new Trinity(new Simulation()); animateLoop(); }
+function animateLoop() { trinity.step(); window.requestAnimationFrame(animateLoop); }
+</script>
+
+</body>
