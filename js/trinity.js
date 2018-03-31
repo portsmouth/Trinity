@@ -4,14 +4,17 @@
 * @constructor
 * @param {Simulation} sceneObj - The object defining the simulation setup
 */
-var Trinity = function(simulation)
+
+var trinity;
+
+var Trinity = function()
 {
+    trinity = this;
+
     this.initialized = false;
     this.terminated = false;
     this.rendering = false;
-    this.simulation = simulation;
-    trinity = this;
-
+    
     let container = document.getElementById("container");
     this.container = container;
 
@@ -33,13 +36,13 @@ var Trinity = function(simulation)
     // Setup THREE.js orbit camera
     var VIEW_ANGLE = 45;
     var ASPECT = this.width / this.height;
-    var NEAR = 0.05;
-    var FAR = 1000;
+    var NEAR = 1.0;
+    var FAR = 10000;
     this.camera = new THREE.PerspectiveCamera(VIEW_ANGLE, ASPECT, NEAR, FAR);
-    this.camera.lookAt(new THREE.Vector3(0, 0, 0));
+    this.camera.up.set(0, 1, 0);
     this.camera.position.set(1, 1, 1);
-    this.camera.up.set(0, 0, 1);
-
+    this.camera.lookAt(new THREE.Vector3(0, 0, 0));
+    
     this.camControls = new THREE.OrbitControls(this.camera, this.container);
     this.camControls.zoomSpeed = 2.0;
     this.camControls.flySpeed = 0.01;
@@ -163,30 +166,40 @@ Trinity.prototype.showGUI = function(show)
 
 Trinity.prototype.init = function()
 {
-    if (this.simulationObj == null) return;
-
-
+    // Initialize solver
+    this.solver.resize(256, 256);
+    
+    // Initialize camera
+    let domain = this.solver.getDomain();   
+    let min     = domain.boundsMin;
+    let max     = domain.boundsMax;
+    let center  = domain.center;
+    let extents = [    (max[0]-min[0]),     (max[1]-min[1]),     (max[2]-min[2])];
+    let relDist = [1.5, 0.75, 1.3];
+    this.camera.position.set(center[0]+relDist[0]*extents[0], 
+                             center[1]+relDist[1]*extents[1], 
+                             center[2]+relDist[2]*extents[2]);
+    this.camControls.target.set(center[0], center[1], center[2]);
 }
 
 
 // Renderer reset on camera or other parameters update
-Trinity.prototype.reset = function(no_recompile = false)
+Trinity.prototype.reset = function()
 {
     if (!this.initialized || this.terminated) return;
-    this.raytracer.reset(no_recompile);
+    this.solver.reset();
+    this.renderer.reset();
 }
    
 
 // Timestep the simulation
 Trinity.prototype.step = function()
 {
-
     // Run a simulation timestep
     this.solver.step();
     
     // Volume render simulation 
     this.renderer.render(this.solver);
-
 }
 
 

@@ -122,7 +122,7 @@ var GLU = {};
             "\n" + gl.getShaderInfoLog(vertexShader)
 
             errMsg += "\n\nProblematic shaders:\n\nVERTEX_SHADER:\n".bold().fontcolor("red") + addLineNumbers(vertSource)
-                    +"\n\nFRAGMENT_SHADER:\n".bold().fontcolor("red") + addLineNumbers(fragSource);
+                    +"\n\nFRAGMENT_SHADER:\n".bold().fontcolor("red") + addLineNumbers(fragSource, 2);
                     
             this.fail(errMsg);
         }
@@ -149,11 +149,16 @@ var GLU = {};
         gl.shaderSource(shader, shaderSource); // Set the shader source code.
         gl.compileShader(shader);              // Compile the shader
         var success = gl.getShaderParameter(shader, gl.COMPILE_STATUS); // Check if it compiled
-        if (!success) 
+        if (!success)
         {
             // Something went wrong during compilation; get the error
             var shaderTypeStr = (shaderType==gl.VERTEX_SHADER) ? 'vertex' : 'fragment';
-            this.fail("Could not compile " + shaderName + " " + shaderTypeStr + " shader: " + gl.getShaderInfoLog(shader));
+            let errMsg = "Could not compile ".bold() + shaderName.bold() + " " + shaderTypeStr.bold() + " shader: \n\n".bold();
+            let glErr = gl.getShaderInfoLog(shader).bold().fontcolor("red");
+            glErr = glErr.replace(/^/gm, "\t");
+            errMsg += glErr;
+            errMsg += "\nProblematic shader:\n\n" + addLineNumbers(shaderSource, 2);
+            this.fail(errMsg);
         }
         return shader;
     }
@@ -600,13 +605,16 @@ var GLU = {};
     {
         var sorryP = document.createElement("p"); 
         sorryP.appendChild(document.createTextNode("[Trinity] error occurred:"));
-        sorryP.style.fontSize = "32px";
-        sorryP.style.color = 'red';
+        sorryP.style.fontSize = "24px";
+        sorryP.style.color = 'darkorange';
 
         var failureP = document.createElement("p");
         failureP.className = "warning-box";
-        failureP.style.fontSize = "24px";
-        failureP.innerHTML = '<pre>' + '    ' + message + '</pre>';
+        failureP.style.fontSize = "18px";
+        failureP.style.overflow = "scroll";
+        failureP.style.height = "85%";
+        failureP.style.color = "darkblue";
+        failureP.innerHTML = '<pre>' + '   ' + message + '</pre>';
 
         var failureDiv = document.createElement("div"); 
         failureDiv.className = "center";
@@ -617,7 +625,7 @@ var GLU = {};
         this.canvas.style.display = 'none';
 
         trinity.terminated = true;
-        throw new Error("Terminating Gravy");
+        throw new Error("Terminating Trinity");
     }
 
     // Create CSS rules for the document contents

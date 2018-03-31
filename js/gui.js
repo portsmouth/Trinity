@@ -53,7 +53,6 @@ function hexToRgb(hex)
 GUI.prototype.createRendererSettings = function()
 {
 	this.rendererFolder = this.gui.addFolder('Raytracer');
-	this.raytracerSettings = {};
 	var renderer = trinity.getRenderer();
 	var camera = trinity.getCamera();
 
@@ -96,20 +95,13 @@ GUI.prototype.createRendererSettings = function()
 								}
 							} );
 
-	this.gui.remember(this.raytracerSettings);
 	this.rendererFolder.close();
 }
 
 GUI.prototype.createSimulationSettings = function()
 {
-	let simulationObj = trinity.getSimulation();
-	if (typeof simulationObj.initGui !== "undefined") 
-	{
-		this.userFolder = this.gui.addFolder('Simulation');
-		simulationObj.initGui(this);
-		this.userFolder.open();
-		this.gui.remember(this.sceneSettings);
-	}
+	this.simulationFolder = this.gui.addFolder('Simulation');
+	this.simulationFolder.open();
 }
 
 /** 

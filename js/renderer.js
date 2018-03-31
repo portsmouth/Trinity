@@ -12,8 +12,10 @@ var Renderer = function()
     this.colorB = [1.0,0.8,0.5];
 
     // Internal buffers and programs
-    this.fbo = null;
     this.boxVbo = null;
+    this.quadVbo = this.createQuadVbo();
+    this.fbo = new GLU.RenderTarget();
+
     this.volumeProgram    = null;
     this.lineProgram      = null;
     this.tonemapProgram   = null;
@@ -100,7 +102,6 @@ Renderer.prototype.reset = function(no_recompile = false)
 {
     this.numFramesSinceReset = 0;
     if (!no_recompile) this.compileShaders();
-    this.currentState = 0;
 }
 
 
@@ -152,10 +153,37 @@ Renderer.prototype.render = function(solver)
     var camX = new THREE.Vector3();
     camX.crossVectors(camUp, camDir);
 
+    let domain = solver.getDomain();   
+    let Q      = solver.getQ();
+
     // @todp: volume render
-
     // for initial debug, draw evolving 2d density field
+    {
+        this.volumeProgram.bind();
 
+        this.volumeProgram.uniformTexture("Q", Q); // (the simulation)
+        this.volumeProgram.uniform2Fv("resolution", [this._width, this._height]);
+        this.volumeProgram.uniform3Fv("camPos", [camPos.x, camPos.y, camPos.z]);
+        this.volumeProgram.uniform3Fv("camDir", [camDir.x, camDir.y, camDir.z]);
+        this.volumeProgram.uniform3Fv("camX", [camX.x, camX.y, camX.z]);
+        this.volumeProgram.uniform3Fv("camY", [camUp.x, camUp.y, camUp.z]);
+        this.volumeProgram.uniformF("camFovy", camera.fov);
+        this.volumeProgram.uniformF("camAspect", camera.aspect);
+        this.volumeProgram.uniform3Fv("volMin", domain.boundsMin);
+        this.volumeProgram.uniform3Fv("volMax", domain.boundsMax);
+        this.volumeProgram.uniform3Fv("volCenter", domain.center);
+        this.volumeProgram.uniformF("volRadius", domain.radius);
+        this.volumeProgram.uniformF("volHeight", domain.height);
+        this.volumeProgram.uniformF("dr", domain.radius/domain.Nr);
+        this.volumeProgram.uniformF("dy", domain.height/domain.Ny);
+        this.volumeProgram.uniformI("Nr", domain.Nr);
+        this.volumeProgram.uniformI("Ny", domain.Ny);
+        this.volumeProgram.uniformI("Nraymarch", 64);
+        this.volumeProgram.uniformF("cv", domain.cv);
+
+        this.quadVbo.bind();
+        this.quadVbo.draw(this.volumeProgram, gl.TRIANGLE_FAN);
+    }
 
     // draw simulation bounds
     {
@@ -178,9 +206,10 @@ Renderer.prototype.render = function(solver)
 
 		if (!this.boxVbo)
 		{
-			let o = [0, 0, 0];
-			let e = [1, 1, 1];
-			this.boxVbo = this.createBoxVbo(o, e)
+			let o = domain.boundsMin;
+            let c = domain.boundsMax;
+			let extents = [c[0]-o[0], c[1]-o[1], c[2]-o[2]];
+			this.boxVbo = this.createBoxVbo(o, extents)
 		}
 		
 	    this.boxVbo.bind();
