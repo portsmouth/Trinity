@@ -20,7 +20,12 @@ float G(in ivec2 X)
 	// @todo: inject non-zero energy in the first timestep
 	//        within a sphere (which encloses at least one voxel center)
 	// @todo: for now, place this detonation point in the grid center voxel
-	return 0.0;
+	int ir = X.x;
+	int iy = X.y;
+	if (ir<20 && abs(iy-Ny/2)<20) 
+		return 1.0e15; // @todo: magnitude?
+	else
+		return 1.0;
 }
 
 // Equation of state
@@ -78,7 +83,11 @@ vec4 S(in vec4 Q_, in ivec2 X)
 	float q3 = Q_.w; // rho * vz
 	float p = pressure(Q_);
 	vec4 S_;
+	/*
 	S_.x = -q2/r;
+	*/
+	S_.x = G(X)/r; // @todo; (debug test hack, remove)
+
 	S_.y = -(q1 + p)*q2/(q0*r) - g*q3/q0 + G(X)/r;
 	S_.z = -q2*q2 / (r*q0);
 	S_.w = -q2*q3/(r*q0) - q0*g;
@@ -107,9 +116,13 @@ void main()
 	vec4 Q_yn = texelFetch(Q, X_yn, 0);
 	vec4 Qavg = 0.25 * (Q_rp + Q_rn + Q_yp + Q_yn);
 
+	/*
 	Qnext = Qavg - 0.5 * lambda_r * ( R(Q_rp) - R(Q_rn) ) 
 	             - 0.5 * lambda_y * ( Y(Q_yp) - Y(Q_yn) );
 	             + dt * S(Q_, X);
+	*/
+
+	Qnext = Qavg + dt * S(Q_, X); // @todo; (debug test hack, remove)
 }
 
 

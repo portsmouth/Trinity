@@ -49,7 +49,12 @@ float G(in ivec2 X)
 	// @todo: inject non-zero energy in the first timestep
 	//        within a sphere (which encloses at least one voxel center)
 	// @todo: for now, place this detonation point in the grid center voxel
-	return 0.0;
+	int ir = X.x;
+	int iy = X.y;
+	if (ir<20 && abs(iy-Ny/2)<20) 
+		return 1.0e15;
+	else
+		return 1.0;
 }
 
 // Equation of state
@@ -107,7 +112,11 @@ vec4 S(in vec4 Q_, in ivec2 X)
 	float q3 = Q_.w; // rho * vz
 	float p = pressure(Q_);
 	vec4 S_;
+	/*
 	S_.x = -q2/r;
+	*/
+	S_.x = G(X)/r;
+
 	S_.y = -(q1 + p)*q2/(q0*r) - g*q3/q0 + G(X)/r;
 	S_.z = -q2*q2 / (r*q0);
 	S_.w = -q2*q3/(r*q0) - q0*g;
@@ -136,9 +145,13 @@ void main()
 	vec4 Q_yn = texelFetch(Q, X_yn, 0);
 	vec4 Qavg = 0.25 * (Q_rp + Q_rn + Q_yp + Q_yn);
 
+	/*
 	Qnext = Qavg - 0.5 * lambda_r * ( R(Q_rp) - R(Q_rn) ) 
 	             - 0.5 * lambda_y * ( Y(Q_yp) - Y(Q_yn) );
 	             + dt * S(Q_, X);
+	*/
+
+	Qnext = Qavg + dt * S(Q_, X);
 }
 `,
 
@@ -347,6 +360,10 @@ vec3 tempToRGB(float T_kelvin)
 void main()
 {
     vec2 pixel = gl_FragCoord.xy;
+
+    //vec4 Q_  = texelFetch(Q, ivec2(pixel), 0);
+    //gbuf_rad = Q_;
+
     vec3 rayPos, rayDir;
     constructPrimaryRay(pixel, rayPos, rayDir);
 
@@ -358,32 +375,31 @@ void main()
     {
         // Raymarch
         float dl = (t1 - t0) / float(Nraymarch);
-        vec3 x = rayPos + (t0+0.5*dl)*rayDir;
+        vec3 pMarch = rayPos + (t0+0.5*dl)*rayDir;
         for (int n=0; n<Nraymarch; ++n)
         {   
-            // transform x into simulation domain:
-            float y = x.y - volMin.y;
-            float r = length((x - volCenter).xz);
+            // transform pMarch into simulation domain:
+            float y = pMarch.y - volMin.y;
+            float r = length((pMarch - volCenter).xz);
             if (r<=volRadius)
             {
                 int ir = clamp(int(floor(r/dr)), 0, Nr-1);
                 int iy = clamp(int(floor(y/dy)), 0, Ny-1);
                 vec4 Q_  = texelFetch(Q, ivec2(ir, iy), 0);
-
+                
                 float rho = max(Q_.x, DENOM_EPS);
+                
                 float E   = Q_.y;
-                float vr = Q_.z / rho; // rho * vr
-                float vy = Q_.w / rho; // rho * vy
-                float e = max(0.0, E - 0.5*(vr*vr + vy*vy));  
+                float vr = Q_.z/rho; // rho * vr
+                float vy = Q_.w/rho; // rho * vy
+                float e = max(0.0, E/rho - 0.5*(vr*vr + vy*vy));  
                 float T = e / cv;
                 vec3 blackbody_color = tempToRGB(T);
-
-                float emission = 1.0e-6 * pow(T, 4.0);
-                L += emission * blackbody_color;
-
+                //float emission = 1.0e-2 * pow(T, 4.0);
+                L += dl/(t1-t0) * 0.001 * rho; //T/1000.0; //blackbody_color;
             }
 
-            x += rayDir*dl;
+            pMarch += rayDir*dl;
         }        
     }
     

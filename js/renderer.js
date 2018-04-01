@@ -154,14 +154,15 @@ Renderer.prototype.render = function(solver)
     camX.crossVectors(camUp, camDir);
 
     let domain = solver.getDomain();   
-    let Q      = solver.getQ();
+    let Q      = solver.getQ(); // (the simulation texture)
 
-    // @todp: volume render
-    // for initial debug, draw evolving 2d density field
+    // Volume render
     {
         this.volumeProgram.bind();
 
-        this.volumeProgram.uniformTexture("Q", Q); // (the simulation)
+        Q.bind(0);
+        this.volumeProgram.uniformTexture("Q", Q); 
+
         this.volumeProgram.uniform2Fv("resolution", [this._width, this._height]);
         this.volumeProgram.uniform3Fv("camPos", [camPos.x, camPos.y, camPos.z]);
         this.volumeProgram.uniform3Fv("camDir", [camDir.x, camDir.y, camDir.z]);

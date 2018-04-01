@@ -167,7 +167,7 @@ Trinity.prototype.showGUI = function(show)
 Trinity.prototype.init = function()
 {
     // Initialize solver
-    this.solver.resize(256, 256);
+    this.solver.resize(128, 128);
     
     // Initialize camera
     let domain = this.solver.getDomain();   

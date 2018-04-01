@@ -61,7 +61,7 @@ var Solver = function()
 
 Solver.prototype.compileShaders = function()
 {
-	this.solveEnergy   = new GLU.Shader('solve-energy',    this.shaderSources, null);
+	this.solveEnergy   = new GLU.Shader('solve-energy', this.shaderSources, null);
 }
 
 
@@ -114,7 +114,7 @@ Solver.prototype.initialize = function()
 	                                     // (extinction coefficient will be given by some adjustable proportionality factor)
 	let lapse = Rs * T0 / g;             // atmospheric temperature scale height, in m
 	let rho0 = p0 / (Rs * T0);           // ground-level atmosphere density, in kg / m^3
-	let cv = R / (gamma-1.0);            // specific heat capacity (constant volume), in J / (K gg)
+	let cv = Rs / (gamma-1.0);           // specific heat capacity (constant volume), in J / (K gg)
 	let c = Math.sqrt(gamma*p0/rho0);    // atmospheric sound speed in m/s
 	let dt = 0.5 * Math.min(dr, dy) / c; // approximate timestep satisfying Courant condition
 
@@ -136,16 +136,17 @@ Solver.prototype.initialize = function()
 
     		// Initialize thermal medium:
     		let index = iy*Nr + ir;
-    		Q0[3*index+0] = rho;
-    		Q0[3*index+1] = E;
-    		Q0[3*index+2] = 0.0; // rho * v_r
-    		Q0[3*index+3] = 0.0; // rho * v_z
-   
+ 
+    		Q0[4*index+0] = rho;
+    		Q0[4*index+1] = E;
+    		Q0[4*index+2] = 0.0; // rho * v_r
+    		Q0[4*index+3] = 0.0; // rho * v_z
+
     		// Initialize particulate matter density:
-    		A0[3*index+0] = (y < ground_depth) ? ground_density : 0.0;
-    		A0[3*index+0] = 0.0; // (unused for now)
-    		A0[3*index+1] = 0.0; // (unused for now)
-    		A0[3*index+2] = 0.0; // (unused for now)
+    		A0[4*index+0] = (y < ground_depth) ? ground_density : 0.0;
+    		A0[4*index+0] = 0.0; // (unused for now)
+    		A0[4*index+1] = 0.0; // (unused for now)
+    		A0[4*index+2] = 0.0; // (unused for now)
     	}
 	}
 
@@ -162,7 +163,7 @@ Solver.prototype.initialize = function()
 	                Nr: Nr,
 	                Ny: Ny,
 	                cv: cv }
-	                
+
 	// constants
 	this.dr = dr;
 	this.dy = dy;
@@ -191,7 +192,7 @@ Solver.prototype.createQuadVbo = function()
 
 Solver.prototype.getQ = function()
 {
-	let previousIndex = (this.timestep+1) % 2;
+	let previousIndex = this.timestep % 2;
 	return this.Q[previousIndex];
 }	
 
@@ -216,15 +217,31 @@ Solver.prototype.step = function()
 	this.solveEnergy.uniformF("gammaMO", this.gammaMO);
 	this.solveEnergy.uniformF("g",       this.g);
 
-
 	// Run timestep update
+	gl.viewport(0, 0, this.Nr, this.Ny);
 	this.fbo.bind();
 	this.fbo.drawBuffers(1);
-    this.Q[currIndex].bind(0);                                   // read current frame V
+	this.fbo.attachTexture(this.Q[nextIndex], 0);            // write to Q[nextIndex]
+    this.Q[currIndex].bind(0);                               // read from Q[currIndex]
     this.solveEnergy.uniformTexture("Q", this.Q[currIndex]);
-    this.fbo.attachTexture(this.Q[nextIndex], 0);                 // write next frame V
+    
     this.quadVbo.bind();
     this.quadVbo.draw(this.solveEnergy, gl.TRIANGLE_FAN);
+
+    /*
+    let status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    switch (status)
+    {
+    	case gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT:         console.log("FRAMEBUFFER_INCOMPLETE_ATTACHMENT");         break;
+    	case gl.FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT: console.log("FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT"); break;
+    	case gl.FRAMEBUFFER_INCOMPLETE_DIMENSIONS:         console.log("FRAMEBUFFER_INCOMPLETE_DIMENSIONS");         break;
+    	case gl.FRAMEBUFFER_UNSUPPORTED:                   console.log("FRAMEBUFFER_UNSUPPORTED");                   break;
+    	case gl.FRAMEBUFFER_INCOMPLETE_MULTISAMPLE:        console.log("FRAMEBUFFER_INCOMPLETE_MULTISAMPLE");        break;
+    	case gl.RENDERBUFFER_SAMPLES:                      console.log("RENDERBUFFER_SAMPLES");                      break;
+    	default: break;
+    }
+    */
+
 	this.fbo.unbind();
     gl.bindTexture(gl.TEXTURE_2D, null);
 

@@ -85,6 +85,10 @@ vec3 tempToRGB(float T_kelvin)
 void main()
 {
     vec2 pixel = gl_FragCoord.xy;
+
+    //vec4 Q_  = texelFetch(Q, ivec2(pixel), 0);
+    //gbuf_rad = Q_;
+
     vec3 rayPos, rayDir;
     constructPrimaryRay(pixel, rayPos, rayDir);
 
@@ -96,32 +100,31 @@ void main()
     {
         // Raymarch
         float dl = (t1 - t0) / float(Nraymarch);
-        vec3 x = rayPos + (t0+0.5*dl)*rayDir;
+        vec3 pMarch = rayPos + (t0+0.5*dl)*rayDir;
         for (int n=0; n<Nraymarch; ++n)
         {   
-            // transform x into simulation domain:
-            float y = x.y - volMin.y;
-            float r = length((x - volCenter).xz);
+            // transform pMarch into simulation domain:
+            float y = pMarch.y - volMin.y;
+            float r = length((pMarch - volCenter).xz);
             if (r<=volRadius)
             {
                 int ir = clamp(int(floor(r/dr)), 0, Nr-1);
                 int iy = clamp(int(floor(y/dy)), 0, Ny-1);
                 vec4 Q_  = texelFetch(Q, ivec2(ir, iy), 0);
-
+                
                 float rho = max(Q_.x, DENOM_EPS);
+                
                 float E   = Q_.y;
-                float vr = Q_.z / rho; // rho * vr
-                float vy = Q_.w / rho; // rho * vy
-                float e = max(0.0, E - 0.5*(vr*vr + vy*vy));  
+                float vr = Q_.z/rho; // rho * vr
+                float vy = Q_.w/rho; // rho * vy
+                float e = max(0.0, E/rho - 0.5*(vr*vr + vy*vy));  
                 float T = e / cv;
                 vec3 blackbody_color = tempToRGB(T);
-
-                float emission = 1.0e-6 * pow(T, 4.0);
-                L += emission * blackbody_color;
-
+                //float emission = 1.0e-2 * pow(T, 4.0);
+                L += dl/(t1-t0) * 0.001 * rho; //T/1000.0; //blackbody_color;
             }
 
-            x += rayDir*dl;
+            pMarch += rayDir*dl;
         }        
     }
     

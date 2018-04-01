@@ -22,6 +22,10 @@ var GLU = {};
         if (!gl) this.fail("Could not initialise WebGL 2");
         this.gl = gl;
 
+        this.floatBufExt = gl.getExtension("EXT_color_buffer_float");
+        this.floatLinExt = gl.getExtension("OES_texture_float_linear");
+        if (!this.floatBufExt || !this.floatLinExt) this.fail("Your platform does not support float textures");
+        
         console.log('Supported webGL extensions: ' + gl.getSupportedExtensions());
     }
 
@@ -486,7 +490,6 @@ var GLU = {};
         this.type      = isFloat   ? gl.FLOAT         : gl.UNSIGNED_BYTE;
         this.internalformat   = [gl.R32F, gl.RG32F, gl.RGB32F, gl.RGBA32F][channels - 1];
         this.format           = [gl.RED, gl.RG, gl.RGB, gl.RGBA][channels - 1];
-
         this.interpMode = isLinear ? gl.LINEAR : gl.NEAREST;
 
         this.glName = gl.createTexture();
