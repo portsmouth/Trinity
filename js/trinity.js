@@ -37,7 +37,7 @@ var Trinity = function()
     var VIEW_ANGLE = 45;
     var ASPECT = this.width / this.height;
     var NEAR = 1.0;
-    var FAR = 10000;
+    var FAR = 20000;
     this.camera = new THREE.PerspectiveCamera(VIEW_ANGLE, ASPECT, NEAR, FAR);
     this.camera.up.set(0, 1, 0);
     this.camera.position.set(1, 1, 1);
@@ -167,7 +167,7 @@ Trinity.prototype.showGUI = function(show)
 Trinity.prototype.init = function()
 {
     // Initialize solver
-    this.solver.resize(128, 128);
+    this.solver.resize(256, 256);
     
     // Initialize camera
     let domain = this.solver.getDomain();   

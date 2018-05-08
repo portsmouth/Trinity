@@ -154,14 +154,18 @@ Renderer.prototype.render = function(solver)
     camX.crossVectors(camUp, camDir);
 
     let domain = solver.getDomain();   
-    let Q      = solver.getQ(); // (the simulation texture)
+    let Qair   = solver.getQair(); // (the air simulation texture)
+    let Qpar   = solver.getQpar(); // (the particles simulation texture)
 
     // Volume render
     {
         this.volumeProgram.bind();
 
-        Q.bind(0);
-        this.volumeProgram.uniformTexture("Q", Q); 
+        Qair.bind(0);
+        this.volumeProgram.uniformTexture("Qair", Qair); 
+
+        Qpar.bind(1);
+        this.volumeProgram.uniformTexture("Qpar", Qpar); 
 
         this.volumeProgram.uniform2Fv("resolution", [this._width, this._height]);
         this.volumeProgram.uniform3Fv("camPos", [camPos.x, camPos.y, camPos.z]);
@@ -181,7 +185,9 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniformI("Ny", domain.Ny);
         this.volumeProgram.uniformI("Nraymarch", 64);
         this.volumeProgram.uniformF("cv", domain.cv);
-
+        this.volumeProgram.uniform3Fv("extinctionMultiplier", [0.001, 0.001, 0.001]);
+        this.volumeProgram.uniformF("emissionMultiplier", 5.0e-11);
+        
         this.quadVbo.bind();
         this.quadVbo.draw(this.volumeProgram, gl.TRIANGLE_FAN);
     }

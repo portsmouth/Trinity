@@ -1,5 +1,98 @@
 var Shaders = {
 
+'advect-fragment-shader': `#version 300 es
+precision highp float;
+
+uniform sampler2D Qair;
+
+uniform int Nr;
+uniform int Ny;
+uniform float Delta;
+uniform float g;        // gravitational acceleration
+uniform float beta;     // buoyancy
+
+out vec2 v_texcoord;
+out vec4 Qair_next;
+
+void main()
+{
+    ivec2 X = ivec2(gl_FragCoord.xy);
+    vec4 Q = texelFetch(Qair, X,    0);
+    float vr = Q.r;
+    float vy = Q.g;
+    float  T = Q.b;
+    float  p = Q.a;
+
+    // Semi-Lagrangian advection 
+    float u_advect = clamp(v_texcoord.x - vr/float(Nr), 0.0, 1.0);
+    float v_advect = clamp(v_texcoord.y - vy/float(Ny), 0.0, 1.0);
+    vec4 Q_advect = texture(Qair, vec2(u_advect, v_advect),    0);
+
+    // vr advect
+    Qair_next.r = Q_advect.r;
+
+    // vz advect + force
+    Qair_next.g = Q_advect.g + g + beta * (Q_advect.b); // - T0
+
+    // T advect
+    Qair_next.b = Q_advect.b;
+
+    // p copy
+    Qair_next.a = Q.a;
+}
+`,
+
+'advect-vertex-shader': `#version 300 es
+precision highp float;
+
+in vec3 Position;
+in vec2 TexCoord;
+
+out vec2 v_texcoord;
+
+void main() 
+{
+    gl_Position = vec4(Position, 1.0);
+    v_texcoord = TexCoord;
+}
+`,
+
+'copy-fragment-shader': `#version 300 es
+precision highp float;
+
+uniform sampler2D Qred;
+uniform sampler2D Qblack;
+
+out vec4 Qcopy;
+
+void main()
+{
+    vec2 p = vec2(floor(gl_FragCoord.x), floor(gl_FragCoord.y));
+    ivec2 X = ivec2(gl_FragCoord.xy);
+    int black = int(mod(p.x + mod(p.y, 2), 2)); 
+    if (black)
+    {
+        Qcopy = texelFetch(Qblack, X,    0);
+    }
+    else
+    {
+        Qcopy = texelFetch(Qred, X,    0);
+    }
+}
+`,
+
+'copy-vertex-shader': `#version 300 es
+precision highp float;
+
+in vec3 Position;
+in vec2 TexCoord;
+
+void main() 
+{
+    gl_Position = vec4(Position, 1.0);
+}
+`,
+
 'line-fragment-shader': `#version 300 es
 precision highp float;
 
@@ -26,136 +119,55 @@ void main()
 }
 `,
 
-'solve-energy-fragment-shader': `#version 300 es
+'project-black-fragment.shader': `#version 300 es
 precision highp float;
 
-uniform sampler2D Q;
+uniform sampler2D Qin;
 
 uniform int Nr;
 uniform int Ny;
-uniform float dt;
-uniform float dr;
-uniform float dy;
-uniform float gammaMO; // (gamma-1)
-uniform float g;        // gravitational acceleration
+uniform float Delta;
+uniform int writeBlack;
 
-out vec4 Qnext;
-
-#define DENOM_EPS 1.0e-7
-
-// energy injection term
-float G(in ivec2 X)
-{
-	// @todo: inject non-zero energy in the first timestep
-	//        within a sphere (which encloses at least one voxel center)
-	// @todo: for now, place this detonation point in the grid center voxel
-	int ir = X.x;
-	int iy = X.y;
-	if (ir<20 && abs(iy-Ny/2)<20) 
-		return 1.0e15;
-	else
-		return 1.0;
-}
-
-// Equation of state
-float pressure(in vec4 Q_)
-{
-	float rho = Q_.x; // rho
-	float E   = Q_.y; // total energy density
-	float vr  = Q_.z / max(DENOM_EPS, rho);
-	float vz  = Q_.w / max(DENOM_EPS, rho);
-	// p = (gamma-1) * rho * e, where e = E/rho - v^2/2 (specific internal energy)
-	float p = gammaMO * max(0.0, E - 0.5*rho*(vr*vr + vz*vz));	
-	return p;
-}
-
-// r-flux
-vec4 R(in vec4 Q_)
-{
-	float q0 = Q_.x; // rho
-	float q1 = Q_.y; // E
-	float q2 = Q_.z; // rho * vr
-	float q3 = Q_.w; // rho * vz
-	float p = pressure(Q_);
-	vec4 R_;
-	R_.x = q2;
-	R_.y = (q1 + p) * q2/q0;
-	R_.z = p + q2*q2/q0;
-	R_.w = q2*q3 / q0;
-	return R_;
-}
-
-// y-flux
-vec4 Y(in vec4 Q_)
-{
-	float q0 = Q_.x; // rho
-	float q1 = Q_.y; // E
-	float q2 = Q_.z; // rho * vr
-	float q3 = Q_.w; // rho * vz
-	float p = pressure(Q_);
-	vec4 Y_;
-	Y_.x = q3;
-	Y_.y = (q1 + p) * q3/q0;
-	Y_.z = q2*q3/q0;
-	Y_.w = p + q3*q3 / q0;
-	return Y_;
-}
-
-
-// source term
-vec4 S(in vec4 Q_, in ivec2 X)
-{
-	float r = (0.5 + float(X.x))*dr;
-	float q0 = Q_.x; // rho
-	float q1 = Q_.y; // E
-	float q2 = Q_.z; // rho * vr
-	float q3 = Q_.w; // rho * vz
-	float p = pressure(Q_);
-	vec4 S_;
-	/*
-	S_.x = -q2/r;
-	*/
-	S_.x = G(X)/r;
-
-	S_.y = -(q1 + p)*q2/(q0*r) - g*q3/q0 + G(X)/r;
-	S_.z = -q2*q2 / (r*q0);
-	S_.w = -q2*q3/(r*q0) - q0*g;
-	return S_;
-}	
-
+out vec4 Qout;
 
 void main()
 {
-	// Setup local stencil:
-	ivec2 X = ivec2(gl_FragCoord.xy);
-	int ir = X.x;
-	int iy = X.y;
-	ivec2 X_rp = ivec2(min(ir+1, Nr-1), iy);
-	ivec2 X_rn = ivec2(max(ir-1, 0),    iy);
-	ivec2 X_yp = ivec2(ir, min(iy+1, Ny-1));
-	ivec2 X_yn = ivec2(ir, max(iy-1, 0));
+    vec2 p = vec2(floor(gl_FragCoord.x), floor(gl_FragCoord.y));
+    ivec2 X = ivec2(gl_FragCoord.xy);
+    int black = int(mod(p.x + mod(p.y, 2), 2)); 
 
-	// Update Q via Lax-Friedrichs method:
-	float lambda_r = dt/dr;
-	float lambda_y = dt/dy;
-	vec4 Q_   = texelFetch(Q, X,    0);
-	vec4 Q_rp = texelFetch(Q, X_rp, 0);
-	vec4 Q_rn = texelFetch(Q, X_rn, 0);
-	vec4 Q_yp = texelFetch(Q, X_yp, 0);
-	vec4 Q_yn = texelFetch(Q, X_yn, 0);
-	vec4 Qavg = 0.25 * (Q_rp + Q_rn + Q_yp + Q_yn);
+    int ir = X.x;
+    int iy = X.y;
+    float r = (0.5 + float(ir))*Delta;
+    float y = (0.5 + float(iy))*Delta;
 
-	/*
-	Qnext = Qavg - 0.5 * lambda_r * ( R(Q_rp) - R(Q_rn) ) 
-	             - 0.5 * lambda_y * ( Y(Q_yp) - Y(Q_yn) );
-	             + dt * S(Q_, X);
-	*/
+    // Neumann boundary conditions
+    ivec2 X_rp = ivec2(min(ir+1, Nr-1), iy);
+    ivec2 X_rn = ivec2(max(ir-1, 0),    iy);
+    ivec2 X_yp = ivec2(ir, min(iy+1, Ny-1));
+    ivec2 X_yn = ivec2(ir, max(iy-1, 0));
 
-	Qnext = Qavg + dt * S(Q_, X);
+    // Get pressure stencil
+    vec4 Q   = texelFetch(Qair, X,    0);
+    Qout = Q;
+
+    if (black)
+    {
+        vec4 Q_rp = texelFetch(Qair, X_rp, 0);
+        vec4 Q_rn = texelFetch(Qair, X_rn, 0);
+        vec4 Q_yp = texelFetch(Qair, X_yp, 0);
+        vec4 Q_yn = texelFetch(Qair, X_yn, 0);
+        float divv = 0.5*(Q_rp.r - Q_rn.r + Q_yp.g - Q_yn.g)/Delta;
+        float avgp = 0.5*(Q_rp.a + Q_rn.a + Q_yp.a + Q_yn.a);
+        float p = avgp + 0.125*Delta*(Q_rp.a - Q_rn.a)/r - 0.25*Delta*Delta*divv;
+        Qout = Q;
+        Qout.a = p;
+    }
 }
 `,
 
-'solve-energy-vertex-shader': `#version 300 es
+'project-black-vertex.shader': `#version 300 es
 precision highp float;
 
 in vec3 Position;
@@ -167,26 +179,64 @@ void main()
 }
 `,
 
-'solve-velocity-fragment-shader': `#version 300 es
+'project-red-fragment.shader': `#version 300 es
+precision highp float;
 
+uniform sampler2D Qin;
+
+uniform int Nr;
+uniform int Ny;
+uniform float Delta;
+uniform int writeBlack;
+
+out vec4 Qout;
+
+void main()
+{
+    vec2 p = vec2(floor(gl_FragCoord.x), floor(gl_FragCoord.y));
+    ivec2 X = ivec2(gl_FragCoord.xy);
+    int black = int(mod(p.x + mod(p.y, 2), 2)); 
+
+    int ir = X.x;
+    int iy = X.y;
+    float r = (0.5 + float(ir))*Delta;
+    float y = (0.5 + float(iy))*Delta;
+
+    // Neumann boundary conditions
+    ivec2 X_rp = ivec2(min(ir+1, Nr-1), iy);
+    ivec2 X_rn = ivec2(max(ir-1, 0),    iy);
+    ivec2 X_yp = ivec2(ir, min(iy+1, Ny-1));
+    ivec2 X_yn = ivec2(ir, max(iy-1, 0));
+
+    // Get pressure stencil
+    vec4 Q   = texelFetch(Qair, X,    0);
+    Qout = Q;
+
+    if (!black)
+    {
+        vec4 Q_rp = texelFetch(Qair, X_rp, 0);
+        vec4 Q_rn = texelFetch(Qair, X_rn, 0);
+        vec4 Q_yp = texelFetch(Qair, X_yp, 0);
+        vec4 Q_yn = texelFetch(Qair, X_yn, 0);
+        float divv = 0.5*(Q_rp.r - Q_rn.r + Q_yp.g - Q_yn.g)/Delta;
+        float avgp = 0.5*(Q_rp.a + Q_rn.a + Q_yp.a + Q_yn.a);
+        float p = avgp + 0.125*Delta*(Q_rp.a - Q_rn.a)/r - 0.25*Delta*Delta*divv;
+        Qout = Q;
+        Qout.a = p;
+    }
+}
 `,
 
-'solve-velocity-vertex-shader': `#version 300 es
+'project-red-vertex.shader': `#version 300 es
 precision highp float;
 
 in vec3 Position;
 in vec2 TexCoord;
-out vec2 vTexCoord;
 
 void main() 
 {
     gl_Position = vec4(Position, 1.0);
-    vTexCoord = TexCoord;
 }
-`,
-
-'solver-fragment-shader': `#version 300 es
-
 `,
 
 'tonemap-fragment-shader': `#version 300 es
@@ -273,6 +323,58 @@ void main()
 }
 `,
 
+'update-fragment-shader': `#version 300 es
+precision highp float;
+
+uniform sampler2D Qair;
+
+uniform int Nr;
+uniform int Ny;
+uniform float Delta;
+
+out vec4 Qout;
+
+void main()
+{
+    // Setup local stencil:
+    ivec2 X = ivec2(gl_FragCoord.xy);
+    int ir = X.x;
+    int iy = X.y;
+
+    // Neumann boundary conditions
+    ivec2 X_rp = ivec2(min(ir+1, Nr-1), iy);
+    ivec2 X_rn = ivec2(max(ir-1, 0),    iy);
+    ivec2 X_yp = ivec2(ir, min(iy+1, Ny-1));
+    ivec2 X_yn = ivec2(ir, max(iy-1, 0));
+
+    // Compute gradient of pressure field
+    vec4 Q   = texelFetch(Qair, X,    0);
+    vec4 Q_rp = texelFetch(Qair, X_rp, 0);
+    vec4 Q_rn = texelFetch(Qair, X_rn, 0);
+    vec4 Q_yp = texelFetch(Qair, X_yp, 0);
+    vec4 Q_yn = texelFetch(Qair, X_yn, 0);
+    float dpdr = 0.5*(Q_rp.a - Q_rn.a)/Delta;
+    float dpdy = 0.5*(Q_yp.a - Q_yn.a)/Delta;
+
+    // Update velocity accordingly
+    Qout.r = Qin.r - dpdr;
+    Qout.g = Qin.g - dpdy;
+    Qout.ba = Qin.ba;
+}
+`,
+
+'update-vertex-shader': `#version 300 es
+precision highp float;
+
+in vec3 Position;
+in vec2 TexCoord;
+
+void main() 
+{
+    gl_Position = vec4(Position, 1.0);
+}
+`,
+
 'volume-fragment-shader': `#version 300 es
 precision highp float;
 
@@ -298,8 +400,11 @@ uniform int Nr;
 uniform int Ny;
 uniform int Nraymarch;
 uniform float cv; // specific heat capacity
+uniform vec3 extinctionMultiplier;
+uniform float emissionMultiplier;
 
-uniform sampler2D Q;
+uniform sampler2D Qair; // air simulation
+uniform sampler2D Qpar; // particles simulation
 
 #define DENOM_EPS 1.0e-7
 #define sort2(a,b) { vec3 tmp=min(a,b); b=a+b-tmp; a=tmp; }
@@ -345,6 +450,7 @@ void planckianLocus(float T_kelvin, inout float xc, inout float yc)
 
 vec3 tempToRGB(float T_kelvin)
 {
+    if (T_kelvin <= 1000.0) return vec3(0.0);
     float x, y;
     planckianLocus(T_kelvin, x, y);
     float X = x/y;
@@ -356,14 +462,18 @@ vec3 tempToRGB(float T_kelvin)
     return vec3(R, G, B);
 }
 
+float airTemp(vec4 Qair_)
+{
+    float rho_air = max(Qair_.x, DENOM_EPS);
+    float E_air   = Qair_.y;
+    vec2 vrz_air  = Qair_.zw / rho_air;
+    float e_air = max(0.0, E_air/rho_air - 0.5*dot(vrz_air, vrz_air));  
+    return e_air / cv;  
+}
 
 void main()
 {
     vec2 pixel = gl_FragCoord.xy;
-
-    //vec4 Q_  = texelFetch(Q, ivec2(pixel), 0);
-    //gbuf_rad = Q_;
-
     vec3 rayPos, rayDir;
     constructPrimaryRay(pixel, rayPos, rayDir);
 
@@ -376,6 +486,8 @@ void main()
         // Raymarch
         float dl = (t1 - t0) / float(Nraymarch);
         vec3 pMarch = rayPos + (t0+0.5*dl)*rayDir;
+
+        vec3 Transmission = vec3(1.0); // transmittance
         for (int n=0; n<Nraymarch; ++n)
         {   
             // transform pMarch into simulation domain:
@@ -385,20 +497,23 @@ void main()
             {
                 int ir = clamp(int(floor(r/dr)), 0, Nr-1);
                 int iy = clamp(int(floor(y/dy)), 0, Ny-1);
-                vec4 Q_  = texelFetch(Q, ivec2(ir, iy), 0);
+                vec4 Qair_  = texelFetch(Qair, ivec2(ir, iy), 0);
+                vec4 Qpar_  = texelFetch(Qpar, ivec2(ir, iy), 0);
                 
-                float rho = max(Q_.x, DENOM_EPS);
-                
-                float E   = Q_.y;
-                float vr = Q_.z/rho; // rho * vr
-                float vy = Q_.w/rho; // rho * vy
-                float e = max(0.0, E/rho - 0.5*(vr*vr + vy*vy));  
-                float T = e / cv;
-                vec3 blackbody_color = tempToRGB(T);
-                //float emission = 1.0e-2 * pow(T, 4.0);
-                L += dl/(t1-t0) * 0.001 * rho; //T/1000.0; //blackbody_color;
-            }
+                // Emission to blackbody radiation from hot air
+                float T_air = airTemp(Qair_);
+                vec3 blackbody_color = tempToRGB(T_air);
+                float rho_air = max(Qair_.x, DENOM_EPS);
+                const float sigma = 5.67e-8; // Stefan–Boltzmann constant
+                vec3 emission = Transmission * emissionMultiplier * sigma * pow(T_air, 4.0) * blackbody_color;
 
+                // Absorption by particles ("dust")
+                float rho_par = Qpar_.x;
+                vec3 extinction = extinctionMultiplier * rho_par;
+
+                Transmission *= exp(-extinction*dl);
+                L += emission * dl;
+            }
             pMarch += rayDir*dl;
         }        
     }
