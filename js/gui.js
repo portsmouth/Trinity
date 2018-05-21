@@ -58,6 +58,10 @@ GUI.prototype.createRendererSettings = function()
 
 	this.rendererFolder.add(renderer, 'exposure', -10.0, 10.0);
 	this.rendererFolder.add(renderer, 'gamma', 0.0, 3.0);
+
+    this.rendererFolder.add(renderer, 'extinctionMultiplier', 0.0, 200.0);
+    this.rendererFolder.add(renderer, 'emissionMultiplier', 0.0, 10.0);
+    this.rendererFolder.add(renderer, 'tempMultiplier', 0.0, 10.0);
 	
 	this.rendererFolder.colorA = [renderer.colorA[0]*255.0, renderer.colorA[1]*255.0, renderer.colorA[2]*255.0];
 	let itemA = this.rendererFolder.addColor(this.rendererFolder, 'colorA');

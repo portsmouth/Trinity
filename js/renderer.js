@@ -10,6 +10,9 @@ var Renderer = function()
     this.gamma = 2.2;
     this.colorA = [1.0,0.8,0.5];
     this.colorB = [1.0,0.8,0.5];
+    this.emissionMultiplier = 2.0;
+    this.extinctionMultiplier = 1.0;
+    this.tempMultiplier = 2.0;
 
     // Internal buffers and programs
     this.boxVbo = null;
@@ -154,8 +157,8 @@ Renderer.prototype.render = function(solver)
     camX.crossVectors(camUp, camDir);
 
     let domain = solver.getDomain();   
-    let Qair   = solver.getQair(); // (the air simulation texture)
-    let Qpar   = solver.getQpar(); // (the particles simulation texture)
+    let Qair    = solver.getQair();    // (the air simulation texture)
+    let Qdebris = solver.getQdebris(); // (the debris simulation texture)
 
     // Volume render
     {
@@ -164,8 +167,8 @@ Renderer.prototype.render = function(solver)
         Qair.bind(0);
         this.volumeProgram.uniformTexture("Qair", Qair); 
 
-        Qpar.bind(1);
-        this.volumeProgram.uniformTexture("Qpar", Qpar); 
+        Qdebris.bind(1);
+        this.volumeProgram.uniformTexture("Qdebris", Qdebris); 
 
         this.volumeProgram.uniform2Fv("resolution", [this._width, this._height]);
         this.volumeProgram.uniform3Fv("camPos", [camPos.x, camPos.y, camPos.z]);
@@ -179,14 +182,13 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniform3Fv("volCenter", domain.center);
         this.volumeProgram.uniformF("volRadius", domain.radius);
         this.volumeProgram.uniformF("volHeight", domain.height);
-        this.volumeProgram.uniformF("dr", domain.radius/domain.Nr);
-        this.volumeProgram.uniformF("dy", domain.height/domain.Ny);
+        this.volumeProgram.uniformF("Delta", domain.Delta);
         this.volumeProgram.uniformI("Nr", domain.Nr);
         this.volumeProgram.uniformI("Ny", domain.Ny);
-        this.volumeProgram.uniformI("Nraymarch", 64);
-        this.volumeProgram.uniformF("cv", domain.cv);
-        this.volumeProgram.uniform3Fv("extinctionMultiplier", [0.001, 0.001, 0.001]);
-        this.volumeProgram.uniformF("emissionMultiplier", 5.0e-11);
+        this.volumeProgram.uniformI("Nraymarch", 256);
+        this.volumeProgram.uniformF("extinctionMultiplier", this.extinctionMultiplier);
+        this.volumeProgram.uniformF("emissionMultiplier", this.emissionMultiplier);
+        this.volumeProgram.uniformF("tempMultiplier", this.tempMultiplier);
         
         this.quadVbo.bind();
         this.quadVbo.draw(this.volumeProgram, gl.TRIANGLE_FAN);

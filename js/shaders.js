@@ -3,42 +3,57 @@ var Shaders = {
 'advect-fragment-shader': `#version 300 es
 precision highp float;
 
-uniform sampler2D Qair;
+uniform sampler2D Qin;
 
 uniform int Nr;
 uniform int Ny;
 uniform float Delta;
-uniform float g;        // gravitational acceleration
+uniform float g;        // gravitational acceleration (in -y dir)
 uniform float beta;     // buoyancy
 
-out vec2 v_texcoord;
-out vec4 Qair_next;
+in vec2 v_texcoord;
+out vec4 Qout;
 
 void main()
 {
     ivec2 X = ivec2(gl_FragCoord.xy);
-    vec4 Q = texelFetch(Qair, X,    0);
-    float vr = Q.r;
-    float vy = Q.g;
+    vec4 Q = texelFetch(Qin, X,    0);
+
+    float vr = Q.r; // in voxels/timestep
+    float vy = Q.g; // in voxels/timestep
     float  T = Q.b;
     float  p = Q.a;
 
     // Semi-Lagrangian advection 
     float u_advect = clamp(v_texcoord.x - vr/float(Nr), 0.0, 1.0);
     float v_advect = clamp(v_texcoord.y - vy/float(Ny), 0.0, 1.0);
-    vec4 Q_advect = texture(Qair, vec2(u_advect, v_advect),    0);
+    vec4 Q_advect = texture(Qin, vec2(u_advect, v_advect));
+
+    float vr_advect = Q_advect.r;
+    float vy_advect = Q_advect.g;
+    float  T_advect = Q_advect.b;
+    float  p_advect = Q_advect.a;
 
     // vr advect
-    Qair_next.r = Q_advect.r;
-
-    // vz advect + force
-    Qair_next.g = Q_advect.g + g + beta * (Q_advect.b); // - T0
+    Qout.r = vr_advect;
+    
+    // Solid boundary condition at y=0
+    int iy = X.y;
+    if (iy==0)
+    {
+        Qout.g = 0.0;
+    }
+    else
+    {
+        // vy advect + force
+        Qout.g = vy_advect - g + beta*T_advect; // - T0
+    }
 
     // T advect
-    Qair_next.b = Q_advect.b;
+    Qout.b = T_advect;
 
     // p copy
-    Qair_next.a = Q.a;
+    Qout.a = p_advect;
 }
 `,
 
@@ -60,24 +75,13 @@ void main()
 'copy-fragment-shader': `#version 300 es
 precision highp float;
 
-uniform sampler2D Qred;
-uniform sampler2D Qblack;
-
+uniform sampler2D Qin;
 out vec4 Qcopy;
 
 void main()
 {
-    vec2 p = vec2(floor(gl_FragCoord.x), floor(gl_FragCoord.y));
     ivec2 X = ivec2(gl_FragCoord.xy);
-    int black = int(mod(p.x + mod(p.y, 2), 2)); 
-    if (black)
-    {
-        Qcopy = texelFetch(Qblack, X,    0);
-    }
-    else
-    {
-        Qcopy = texelFetch(Qred, X,    0);
-    }
+    Qcopy = texelFetch(Qin, X,    0);
 }
 `,
 
@@ -90,6 +94,47 @@ in vec2 TexCoord;
 void main() 
 {
     gl_Position = vec4(Position, 1.0);
+}
+`,
+
+'debris-fragment-shader': `#version 300 es
+precision highp float;
+
+uniform sampler2D Qdebris;
+uniform sampler2D Qair;
+
+uniform int Nr;
+uniform int Ny;
+
+in vec2 v_texcoord;
+out vec4 Qout;
+
+void main()
+{
+    ivec2 X = ivec2(gl_FragCoord.xy);
+    vec4 Qair_ = texelFetch(Qair, X, 0);
+    float vr = Qair_.r; // in voxels/timestep
+    float vy = Qair_.g; // in voxels/timestep
+
+    // Semi-Lagrangian advection 
+    float u_advect = clamp(v_texcoord.x - vr/float(Nr), 0.0, 1.0);
+    float v_advect = clamp(v_texcoord.y - vy/float(Ny), 0.0, 1.0);
+    Qout = texture(Qdebris, vec2(u_advect, v_advect));
+}
+`,
+
+'debris-vertex-shader': `#version 300 es
+precision highp float;
+
+in vec3 Position;
+in vec2 TexCoord;
+
+out vec2 v_texcoord;
+
+void main() 
+{
+    gl_Position = vec4(Position, 1.0);
+    v_texcoord = TexCoord;
 }
 `,
 
@@ -119,55 +164,30 @@ void main()
 }
 `,
 
-'project-black-fragment.shader': `#version 300 es
+'merge-fragment-shader': `#version 300 es
 precision highp float;
 
-uniform sampler2D Qin;
-
-uniform int Nr;
-uniform int Ny;
-uniform float Delta;
-uniform int writeBlack;
-
-out vec4 Qout;
+uniform sampler2D Qred;
+uniform sampler2D Qblack;
+out vec4 Qmerge;
 
 void main()
 {
     vec2 p = vec2(floor(gl_FragCoord.x), floor(gl_FragCoord.y));
     ivec2 X = ivec2(gl_FragCoord.xy);
-    int black = int(mod(p.x + mod(p.y, 2), 2)); 
-
-    int ir = X.x;
-    int iy = X.y;
-    float r = (0.5 + float(ir))*Delta;
-    float y = (0.5 + float(iy))*Delta;
-
-    // Neumann boundary conditions
-    ivec2 X_rp = ivec2(min(ir+1, Nr-1), iy);
-    ivec2 X_rn = ivec2(max(ir-1, 0),    iy);
-    ivec2 X_yp = ivec2(ir, min(iy+1, Ny-1));
-    ivec2 X_yn = ivec2(ir, max(iy-1, 0));
-
-    // Get pressure stencil
-    vec4 Q   = texelFetch(Qair, X,    0);
-    Qout = Q;
-
-    if (black)
+    int black = int(mod(p.x + mod(p.y, 2.0), 2.0)); 
+    if (black==0)
     {
-        vec4 Q_rp = texelFetch(Qair, X_rp, 0);
-        vec4 Q_rn = texelFetch(Qair, X_rn, 0);
-        vec4 Q_yp = texelFetch(Qair, X_yp, 0);
-        vec4 Q_yn = texelFetch(Qair, X_yn, 0);
-        float divv = 0.5*(Q_rp.r - Q_rn.r + Q_yp.g - Q_yn.g)/Delta;
-        float avgp = 0.5*(Q_rp.a + Q_rn.a + Q_yp.a + Q_yn.a);
-        float p = avgp + 0.125*Delta*(Q_rp.a - Q_rn.a)/r - 0.25*Delta*Delta*divv;
-        Qout = Q;
-        Qout.a = p;
+        Qmerge = texelFetch(Qred, X, 0);
+    }
+    else
+    {
+        Qmerge = texelFetch(Qblack, X, 0);
     }
 }
 `,
 
-'project-black-vertex.shader': `#version 300 es
+'merge-vertex-shader': `#version 300 es
 precision highp float;
 
 in vec3 Position;
@@ -179,7 +199,7 @@ void main()
 }
 `,
 
-'project-red-fragment.shader': `#version 300 es
+'project-fragment-shader': `#version 300 es
 precision highp float;
 
 uniform sampler2D Qin;
@@ -187,7 +207,6 @@ uniform sampler2D Qin;
 uniform int Nr;
 uniform int Ny;
 uniform float Delta;
-uniform int writeBlack;
 
 out vec4 Qout;
 
@@ -195,8 +214,6 @@ void main()
 {
     vec2 p = vec2(floor(gl_FragCoord.x), floor(gl_FragCoord.y));
     ivec2 X = ivec2(gl_FragCoord.xy);
-    int black = int(mod(p.x + mod(p.y, 2), 2)); 
-
     int ir = X.x;
     int iy = X.y;
     float r = (0.5 + float(ir))*Delta;
@@ -209,25 +226,22 @@ void main()
     ivec2 X_yn = ivec2(ir, max(iy-1, 0));
 
     // Get pressure stencil
-    vec4 Q   = texelFetch(Qair, X,    0);
+    vec4 Q   = texelFetch(Qin, X,    0);
     Qout = Q;
 
-    if (!black)
-    {
-        vec4 Q_rp = texelFetch(Qair, X_rp, 0);
-        vec4 Q_rn = texelFetch(Qair, X_rn, 0);
-        vec4 Q_yp = texelFetch(Qair, X_yp, 0);
-        vec4 Q_yn = texelFetch(Qair, X_yn, 0);
-        float divv = 0.5*(Q_rp.r - Q_rn.r + Q_yp.g - Q_yn.g)/Delta;
-        float avgp = 0.5*(Q_rp.a + Q_rn.a + Q_yp.a + Q_yn.a);
-        float p = avgp + 0.125*Delta*(Q_rp.a - Q_rn.a)/r - 0.25*Delta*Delta*divv;
-        Qout = Q;
-        Qout.a = p;
-    }
+    vec4 Q_rp = texelFetch(Qin, X_rp, 0);
+    vec4 Q_rn = texelFetch(Qin, X_rn, 0);
+    vec4 Q_yp = texelFetch(Qin, X_yp, 0);
+    vec4 Q_yn = texelFetch(Qin, X_yn, 0);
+    float divv = 0.5*(Q_rp.r - Q_rn.r + Q_yp.g - Q_yn.g)/Delta;
+    float avgp = 0.25*(Q_rp.a + Q_rn.a + Q_yp.a + Q_yn.a);
+    float pressure = avgp - 0.25*Delta*Delta*divv + 0.125*Delta*(Q_rp.a - Q_rn.a)/r;
+    Qout = Q;
+    Qout.a = pressure;    
 }
 `,
 
-'project-red-vertex.shader': `#version 300 es
+'project-vertex-shader': `#version 300 es
 precision highp float;
 
 in vec3 Position;
@@ -326,7 +340,7 @@ void main()
 'update-fragment-shader': `#version 300 es
 precision highp float;
 
-uniform sampler2D Qair;
+uniform sampler2D Qin;
 
 uniform int Nr;
 uniform int Ny;
@@ -348,18 +362,18 @@ void main()
     ivec2 X_yn = ivec2(ir, max(iy-1, 0));
 
     // Compute gradient of pressure field
-    vec4 Q   = texelFetch(Qair, X,    0);
-    vec4 Q_rp = texelFetch(Qair, X_rp, 0);
-    vec4 Q_rn = texelFetch(Qair, X_rn, 0);
-    vec4 Q_yp = texelFetch(Qair, X_yp, 0);
-    vec4 Q_yn = texelFetch(Qair, X_yn, 0);
-    float dpdr = 0.5*(Q_rp.a - Q_rn.a)/Delta;
-    float dpdy = 0.5*(Q_yp.a - Q_yn.a)/Delta;
+    vec4 Q    = texelFetch(Qin, X,    0);
+    vec4 Q_rp = texelFetch(Qin, X_rp, 0);
+    vec4 Q_rn = texelFetch(Qin, X_rn, 0);
+    vec4 Q_yp = texelFetch(Qin, X_yp, 0);
+    vec4 Q_yn = texelFetch(Qin, X_yn, 0);
+    float dpdr = 0.5*(Q_rp.a - Q_rn.a);
+    float dpdy = 0.5*(Q_yp.a - Q_yn.a);
 
     // Update velocity accordingly
-    Qout.r = Qin.r - dpdr;
-    Qout.g = Qin.g - dpdy;
-    Qout.ba = Qin.ba;
+    Qout.r = Q.r - dpdr;
+    Qout.g = Q.g - dpdy;
+    Qout.ba = Q.ba;
 }
 `,
 
@@ -394,17 +408,17 @@ uniform vec3 volMax;
 uniform vec3 volCenter;
 uniform float volRadius;
 uniform float volHeight;
-uniform float dr;
-uniform float dy;
+uniform float Delta; // (cubic) voxel size
 uniform int Nr;
 uniform int Ny;
 uniform int Nraymarch;
-uniform float cv; // specific heat capacity
-uniform vec3 extinctionMultiplier;
-uniform float emissionMultiplier;
 
-uniform sampler2D Qair; // air simulation
-uniform sampler2D Qpar; // particles simulation
+uniform float extinctionMultiplier;
+uniform float emissionMultiplier;
+uniform float tempMultiplier;
+
+uniform sampler2D Qair;    // air simulation
+uniform sampler2D Qdebris; // debris simulation
 
 #define DENOM_EPS 1.0e-7
 #define sort2(a,b) { vec3 tmp=min(a,b); b=a+b-tmp; a=tmp; }
@@ -462,15 +476,6 @@ vec3 tempToRGB(float T_kelvin)
     return vec3(R, G, B);
 }
 
-float airTemp(vec4 Qair_)
-{
-    float rho_air = max(Qair_.x, DENOM_EPS);
-    float E_air   = Qair_.y;
-    vec2 vrz_air  = Qair_.zw / rho_air;
-    float e_air = max(0.0, E_air/rho_air - 0.5*dot(vrz_air, vrz_air));  
-    return e_air / cv;  
-}
-
 void main()
 {
     vec2 pixel = gl_FragCoord.xy;
@@ -478,6 +483,8 @@ void main()
     constructPrimaryRay(pixel, rayPos, rayDir);
 
     vec3 L = vec3(0.0);
+    vec3 Lbackground = vec3(0.2, 0.25, 0.5);
+    vec3 Tr = vec3(1.0); // transmittance
 
     // intersect ray with volume bounds
     float t0, t1;
@@ -487,7 +494,6 @@ void main()
         float dl = (t1 - t0) / float(Nraymarch);
         vec3 pMarch = rayPos + (t0+0.5*dl)*rayDir;
 
-        vec3 Transmission = vec3(1.0); // transmittance
         for (int n=0; n<Nraymarch; ++n)
         {   
             // transform pMarch into simulation domain:
@@ -495,28 +501,31 @@ void main()
             float r = length((pMarch - volCenter).xz);
             if (r<=volRadius)
             {
-                int ir = clamp(int(floor(r/dr)), 0, Nr-1);
-                int iy = clamp(int(floor(y/dy)), 0, Ny-1);
-                vec4 Qair_  = texelFetch(Qair, ivec2(ir, iy), 0);
-                vec4 Qpar_  = texelFetch(Qpar, ivec2(ir, iy), 0);
-                
-                // Emission to blackbody radiation from hot air
-                float T_air = airTemp(Qair_);
-                vec3 blackbody_color = tempToRGB(T_air);
-                float rho_air = max(Qair_.x, DENOM_EPS);
-                const float sigma = 5.67e-8; // Stefan–Boltzmann constant
-                vec3 emission = Transmission * emissionMultiplier * sigma * pow(T_air, 4.0) * blackbody_color;
+                int ir = clamp(int(floor(r/Delta)), 0, Nr-1);
+                int iy = clamp(int(floor(y/Delta)), 0, Ny-1);
+                float u = r/volRadius;
+                float v = y/volHeight;
 
-                // Absorption by particles ("dust")
-                float rho_par = Qpar_.x;
-                vec3 extinction = extinctionMultiplier * rho_par;
+                // Absorption by dust
+                vec4 Qdebris_  = texture(Qdebris, vec2(u, v));
+                vec3 sigma = extinctionMultiplier * Qdebris_.r * vec3(Qdebris_.g, Qdebris_.b, Qdebris_.a);
+                Tr.r *= exp(-sigma.r*dl);
+                Tr.g *= exp(-sigma.g*dl);
+                Tr.b *= exp(-sigma.b*dl);
 
-                Transmission *= exp(-extinction*dl);
+                // Emit blackbody radiation from hot air
+                vec4 Qair_ = texture(Qair, vec2(u, v));
+                float T = tempMultiplier * Qair_.b;
+                //vec3 blackbody_color = tempToRGB(T * 300.0 * tempMultiplier);
+                vec3 emission = Tr * emissionMultiplier * 0.001 * T * vec3(1.0, 0.5, 0.1); //blackbody_color;
+
                 L += emission * dl;
             }
             pMarch += rayDir*dl;
-        }        
+        }  
     }
+
+    L += Tr * Lbackground;
     
     gbuf_rad = vec4(L, 1.0);
 }

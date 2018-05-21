@@ -17,14 +17,17 @@ uniform vec3 volMax;
 uniform vec3 volCenter;
 uniform float volRadius;
 uniform float volHeight;
-uniform float dr;
-uniform float dy;
+uniform float Delta; // (cubic) voxel size
 uniform int Nr;
 uniform int Ny;
 uniform int Nraymarch;
-uniform float cv; // specific heat capacity
 
-uniform sampler2D Q;
+uniform float extinctionMultiplier;
+uniform float emissionMultiplier;
+uniform float tempMultiplier;
+
+uniform sampler2D Qair;    // air simulation
+uniform sampler2D Qdebris; // debris simulation
 
 #define DENOM_EPS 1.0e-7
 #define sort2(a,b) { vec3 tmp=min(a,b); b=a+b-tmp; a=tmp; }
@@ -70,6 +73,7 @@ void planckianLocus(float T_kelvin, inout float xc, inout float yc)
 
 vec3 tempToRGB(float T_kelvin)
 {
+    if (T_kelvin <= 1000.0) return vec3(0.0);
     float x, y;
     planckianLocus(T_kelvin, x, y);
     float X = x/y;
@@ -81,18 +85,15 @@ vec3 tempToRGB(float T_kelvin)
     return vec3(R, G, B);
 }
 
-
 void main()
 {
     vec2 pixel = gl_FragCoord.xy;
-
-    //vec4 Q_  = texelFetch(Q, ivec2(pixel), 0);
-    //gbuf_rad = Q_;
-
     vec3 rayPos, rayDir;
     constructPrimaryRay(pixel, rayPos, rayDir);
 
     vec3 L = vec3(0.0);
+    vec3 Lbackground = vec3(0.2, 0.25, 0.5);
+    vec3 Tr = vec3(1.0); // transmittance
 
     // intersect ray with volume bounds
     float t0, t1;
@@ -101,6 +102,7 @@ void main()
         // Raymarch
         float dl = (t1 - t0) / float(Nraymarch);
         vec3 pMarch = rayPos + (t0+0.5*dl)*rayDir;
+
         for (int n=0; n<Nraymarch; ++n)
         {   
             // transform pMarch into simulation domain:
@@ -108,25 +110,31 @@ void main()
             float r = length((pMarch - volCenter).xz);
             if (r<=volRadius)
             {
-                int ir = clamp(int(floor(r/dr)), 0, Nr-1);
-                int iy = clamp(int(floor(y/dy)), 0, Ny-1);
-                vec4 Q_  = texelFetch(Q, ivec2(ir, iy), 0);
-                
-                float rho = max(Q_.x, DENOM_EPS);
-                
-                float E   = Q_.y;
-                float vr = Q_.z/rho; // rho * vr
-                float vy = Q_.w/rho; // rho * vy
-                float e = max(0.0, E/rho - 0.5*(vr*vr + vy*vy));  
-                float T = e / cv;
-                vec3 blackbody_color = tempToRGB(T);
-                //float emission = 1.0e-2 * pow(T, 4.0);
-                L += dl/(t1-t0) * 0.001 * rho; //T/1000.0; //blackbody_color;
-            }
+                int ir = clamp(int(floor(r/Delta)), 0, Nr-1);
+                int iy = clamp(int(floor(y/Delta)), 0, Ny-1);
+                float u = r/volRadius;
+                float v = y/volHeight;
 
+                // Absorption by dust
+                vec4 Qdebris_  = texture(Qdebris, vec2(u, v));
+                vec3 sigma = extinctionMultiplier * Qdebris_.r * vec3(Qdebris_.g, Qdebris_.b, Qdebris_.a);
+                Tr.r *= exp(-sigma.r*dl);
+                Tr.g *= exp(-sigma.g*dl);
+                Tr.b *= exp(-sigma.b*dl);
+
+                // Emit blackbody radiation from hot air
+                vec4 Qair_ = texture(Qair, vec2(u, v));
+                float T = tempMultiplier * Qair_.b;
+                //vec3 blackbody_color = tempToRGB(T * 300.0 * tempMultiplier);
+                vec3 emission = Tr * emissionMultiplier * 0.001 * T * vec3(1.0, 0.5, 0.1); //blackbody_color;
+
+                L += emission * dl;
+            }
             pMarch += rayDir*dl;
-        }        
+        }  
     }
+
+    L += Tr * Lbackground;
     
     gbuf_rad = vec4(L, 1.0);
 }
