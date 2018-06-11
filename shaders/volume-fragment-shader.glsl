@@ -17,7 +17,6 @@ uniform vec3 volMax;
 uniform vec3 volCenter;
 uniform float volRadius;
 uniform float volHeight;
-uniform float Delta; // (cubic) voxel size
 uniform int Nr;
 uniform int Ny;
 uniform int Nraymarch;
@@ -110,8 +109,8 @@ void main()
             float r = length((pMarch - volCenter).xz);
             if (r<=volRadius)
             {
-                int ir = clamp(int(floor(r/Delta)), 0, Nr-1);
-                int iy = clamp(int(floor(y/Delta)), 0, Ny-1);
+                int ir = clamp(int(floor(r)), 0, Nr-1);
+                int iy = clamp(int(floor(y)), 0, Ny-1);
                 float u = r/volRadius;
                 float v = y/volHeight;
 
@@ -125,9 +124,9 @@ void main()
                 // Emit blackbody radiation from hot air
                 vec4 Qair_ = texture(Qair, vec2(u, v));
                 float T = tempMultiplier * Qair_.b;
-                //vec3 blackbody_color = tempToRGB(T * 300.0 * tempMultiplier);
-                vec3 emission = Tr * emissionMultiplier * 0.001 * T * vec3(1.0, 0.5, 0.1); //blackbody_color;
-
+                vec3 blackbody_color = tempToRGB(T * 300.0 * tempMultiplier);
+                vec3 emission = Tr * emissionMultiplier * 0.001 * T * blackbody_color;
+            
                 L += emission * dl;
             }
             pMarch += rayDir*dl;

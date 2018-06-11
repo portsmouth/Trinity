@@ -10,9 +10,9 @@ var Renderer = function()
     this.gamma = 2.2;
     this.colorA = [1.0,0.8,0.5];
     this.colorB = [1.0,0.8,0.5];
-    this.emissionMultiplier = 2.0;
-    this.extinctionMultiplier = 1.0;
-    this.tempMultiplier = 2.0;
+    this.blackbodyEmission = 5.0;
+    this.debrisExtinction = 10.0;
+    this.tempMultiplier = 1.0;
 
     // Internal buffers and programs
     this.boxVbo = null;
@@ -20,12 +20,14 @@ var Renderer = function()
     this.fbo = new GLU.RenderTarget();
 
     this.volumeProgram    = null;
+    this.sliceProgram     = null;
     this.lineProgram      = null;
     this.tonemapProgram   = null;
 
     // Specify shaders
     this.shaderSources = GLU.resolveShaderSource({
         'volume'         : {'v': 'volume-vertex-shader',  'f': 'volume-fragment-shader'},
+        'slice'          : {'v': 'slice-vertex-shader',   'f': 'slice-fragment-shader'},
         'tonemap'        : {'v': 'tonemap-vertex-shader', 'f': 'tonemap-fragment-shader'},
         'line'           : {'v': 'line-vertex-shader',    'f': 'line-fragment-shader'}
     });
@@ -134,6 +136,7 @@ Renderer.prototype.reset = function(no_recompile = false)
 Renderer.prototype.compileShaders = function()
 {
 	this.volumeProgram  = new GLU.Shader('volume',  this.shaderSources, null);
+    this.sliceProgram  = new GLU.Shader('slice',  this.shaderSources, null);
 	this.lineProgram    = new GLU.Shader('line',    this.shaderSources, null);
 	this.tonemapProgram = new GLU.Shader('tonemap', this.shaderSources, null);
 }
@@ -143,7 +146,7 @@ Renderer.prototype.render = function(solver)
 	let gl = GLU.gl;
 
     gl.disable(gl.DEPTH_TEST);
-    gl.viewport(0, 0, this._width, this._height);
+    gl.viewport(0.0, 0.0, solver.Nr, solver.Ny);
 
 	gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -160,7 +163,29 @@ Renderer.prototype.render = function(solver)
     let Qair    = solver.getQair();    // (the air simulation texture)
     let Qdebris = solver.getQdebris(); // (the debris simulation texture)
 
+    // Slice render
+    {
+        this.sliceProgram.bind();
+
+        Qair.bind(0);
+        this.sliceProgram.uniformTexture("Qair", Qair); 
+
+        Qdebris.bind(1);
+        this.sliceProgram.uniformTexture("Qdebris", Qdebris); 
+
+        this.quadVbo.bind();
+        this.quadVbo.draw(this.sliceProgram, gl.TRIANGLE_FAN);
+
+        this.sliceProgram.uniform2Fv("resolution", [this._width, this._height]);
+        this.sliceProgram.uniformF("debrisExtinction", this.debrisExtinction);
+        this.sliceProgram.uniformF("blackbodyEmission", Math.pow(2.0, this.blackbodyEmission));
+        this.sliceProgram.uniformF("T0", domain.T0);
+        this.sliceProgram.uniformF("exposure", this.exposure);
+        this.sliceProgram.uniformF("invGamma", 1.0/this.gamma);
+    }
+
     // Volume render
+    /*
     {
         this.volumeProgram.bind();
 
@@ -182,7 +207,6 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniform3Fv("volCenter", domain.center);
         this.volumeProgram.uniformF("volRadius", domain.radius);
         this.volumeProgram.uniformF("volHeight", domain.height);
-        this.volumeProgram.uniformF("Delta", domain.Delta);
         this.volumeProgram.uniformI("Nr", domain.Nr);
         this.volumeProgram.uniformI("Ny", domain.Ny);
         this.volumeProgram.uniformI("Nraymarch", 256);
@@ -224,6 +248,7 @@ Renderer.prototype.render = function(solver)
 	    this.boxVbo.bind();
 	    this.boxVbo.draw(this.lineProgram, gl.LINES);
     }
+    */
     
     gl.finish();
 }
