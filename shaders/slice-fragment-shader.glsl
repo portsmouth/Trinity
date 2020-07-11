@@ -56,13 +56,13 @@ void main()
 
     float T = Qair_.b;
     vec3 blackbody_color = tempToRGB(T/T0 * 300.0);
-    
+
     vec3 emission = blackbodyEmission * pow((T-T0)/T0, 4.0) * blackbody_color;
     vec3 sigma = debrisExtinction * Qdebris_.r * vec3(Qdebris_.g, Qdebris_.b, Qdebris_.a);
 
     vec3 L0 = vec3(0.5, 0.6, 0.9);
     vec3 L = (L0 + emission) * exp(-sigma);
- 
+
     // apply gamma correction to convert linear RGB to sRGB
     L = pow(L, vec3(invGamma));
     L *= pow(2.0, exposure);

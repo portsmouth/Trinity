@@ -3,8 +3,6 @@ precision highp float;
 
 in vec2 vTexCoord;
 
-layout(location = 0) out vec4 gbuf_rad;
-
 uniform vec2 resolution;
 uniform vec3 camPos;
 uniform vec3 camDir;
@@ -15,18 +13,24 @@ uniform float camAspect;
 uniform vec3 volMin;
 uniform vec3 volMax;
 uniform vec3 volCenter;
-uniform float volRadius;
-uniform float volHeight;
-uniform int Nr;
-uniform int Ny;
+
+uniform int N;
+uniform float dL;
 uniform int Nraymarch;
 
-uniform float extinctionMultiplier;
-uniform float emissionMultiplier;
-uniform float tempMultiplier;
+uniform float debrisExtinction;
+uniform float blackbodyEmission;
+uniform float TtoKelvin;
+uniform float exposure;
+uniform float invGamma;
 
-uniform sampler2D Qair;    // air simulation
-uniform sampler2D Qdebris; // debris simulation
+/////// input buffers ///////
+uniform sampler2D debris_sampler; // 0, float debris density field
+uniform sampler2D Tair_sampler;   // 1, float temperature field
+uniform sampler2D Vair_sampler;   // 2, vec3 velocity field (for debug, for now)
+
+/////// output buffers ///////
+layout(location = 0) out vec4 gbuf_rad;
 
 #define DENOM_EPS 1.0e-7
 #define sort2(a,b) { vec3 tmp=min(a,b); b=a+b-tmp; a=tmp; }
@@ -34,9 +38,9 @@ uniform sampler2D Qdebris; // debris simulation
 bool boundsIntersect( in vec3 rayPos, in vec3 rayDir, in vec3 bbMin, in vec3 bbMax,
                       inout float t0, inout float t1 )
 {
-    vec3 dL = vec3(1.0f/rayDir.x, 1.0f/rayDir.y, 1.0f/rayDir.z);
-    vec3 lo = (bbMin - rayPos) * dL;
-    vec3 hi = (bbMax - rayPos) * dL;
+    vec3 dX = vec3(1.0f/rayDir.x, 1.0f/rayDir.y, 1.0f/rayDir.z);
+    vec3 lo = (bbMin - rayPos) * dX;
+    vec3 hi = (bbMax - rayPos) * dX;
     sort2(lo, hi);
     bool hit = !( lo.x>hi.y || lo.y>hi.x || lo.x>hi.z || lo.z>hi.x || lo.y>hi.z || lo.z>hi.y );
     t0 = max(max(lo.x, lo.y), lo.z);
@@ -44,11 +48,11 @@ bool boundsIntersect( in vec3 rayPos, in vec3 rayDir, in vec3 bbMin, in vec3 bbM
     return hit;
 }
 
-void constructPrimaryRay(in vec2 pixel,
+void constructPrimaryRay(in vec2 frag,
                          inout vec3 rayPos, inout vec3 rayDir)
 {
     // Compute world ray direction for given (possibly jittered) fragment
-    vec2 ndc = -1.0 + 2.0*(pixel/resolution.xy);
+    vec2 ndc = -1.0 + 2.0*(frag/resolution.xy);
     float fh = tan(0.5*radians(camFovy)); // frustum height
     float fw = camAspect*fh;
     vec3 s = -fw*ndc.x*camX + fh*ndc.y*camY;
@@ -84,11 +88,39 @@ vec3 tempToRGB(float T_kelvin)
     return vec3(R, G, B);
 }
 
+vec4 interp(in sampler2D S, in vec3 wsP)
+{
+    vec3 vsP = wsP / dL;
+    float pY = vsP.y - 0.5;
+    int jlo = clamp(int(floor(pY)), 0, N-1); // lower j-slice
+    int jhi = clamp(         jlo+1, 0, N-1); // upper j-slice
+    float flo = float(jhi) - pY;             // lower j fraction
+    float fhi = 1.0 - flo;                   // upper j fraction
+    vec2 resolution = vec2(float(N*N), float(N)); // @todo: precompute
+    float v = vsP.z / resolution.y;
+    float ulo = (vsP.x + float(jlo)*float(N)) / resolution.x;
+    float uhi = (vsP.x + float(jhi)*float(N)) / resolution.x;
+    vec4 Slo = texture(S, vec2(ulo, v));
+    vec4 Shi = texture(S, vec2(uhi, v));
+    return flo*Slo + fhi*Shi;
+}
+
+ivec2 mapVsToFrag(in ivec3 vsP)
+{
+    // map integer voxel space coords to the corresponding fragment coords
+    int i = vsP.x;
+    int j = vsP.y;
+    int k = vsP.z;
+    int ui = N*j + i;
+    int vi = k;
+    return ivec2(ui, vi);
+}
+
 void main()
 {
-    vec2 pixel = gl_FragCoord.xy;
+    vec2 frag = gl_FragCoord.xy;
     vec3 rayPos, rayDir;
-    constructPrimaryRay(pixel, rayPos, rayDir);
+    constructPrimaryRay(frag, rayPos, rayDir);
 
     vec3 L = vec3(0.0);
     vec3 Lbackground = vec3(0.2, 0.25, 0.5);
@@ -103,39 +135,38 @@ void main()
         vec3 pMarch = rayPos + (t0+0.5*dl)*rayDir;
 
         for (int n=0; n<Nraymarch; ++n)
-        {   
+        {
             // transform pMarch into simulation domain:
-            float y = pMarch.y - volMin.y;
-            float r = length((pMarch - volCenter).xz);
-            if (r<=volRadius)
-            {
-                int ir = clamp(int(floor(r)), 0, Nr-1);
-                int iy = clamp(int(floor(y)), 0, Ny-1);
-                float u = r/volRadius;
-                float v = y/volHeight;
+            vec3 wsP = pMarch - volMin;
+            ivec3 vsP = ivec3(wsP / dL);
+            //vec3 debris = texelFetch(debris_sampler, mapVsToFrag(vsP), 0).rgb;
 
-                // Absorption by dust
-                vec4 Qdebris_  = texture(Qdebris, vec2(u, v));
-                vec3 sigma = extinctionMultiplier * Qdebris_.r * vec3(Qdebris_.g, Qdebris_.b, Qdebris_.a);
-                Tr.r *= exp(-sigma.r*dl);
-                Tr.g *= exp(-sigma.g*dl);
-                Tr.b *= exp(-sigma.b*dl);
+            // Absorption by dust
+            vec3 debris = interp(debris_sampler, wsP).rgb;
 
-                // Emit blackbody radiation from hot air
-                vec4 Qair_ = texture(Qair, vec2(u, v));
-                float T = tempMultiplier * Qair_.b;
-                vec3 blackbody_color = tempToRGB(T * 300.0 * tempMultiplier);
-                vec3 emission = Tr * emissionMultiplier * 0.001 * T * blackbody_color;
-            
-                L += emission * dl;
-            }
+            vec3 debris_color = vec3(1.0, 1.0, 1.0); // @todo: advect colored absorption/scattering coefficient fields of debris
+            vec3 sigma = debrisExtinction * debris_color * debris;
+            Tr.r *= exp(-sigma.r*dl);
+            Tr.g *= exp(-sigma.g*dl);
+            Tr.b *= exp(-sigma.b*dl);
+
+            // Emit blackbody radiation from hot air
+            float T = interp(Tair_sampler, wsP).r;
+            vec3 blackbody_color = tempToRGB(T * TtoKelvin);
+            vec3 emission = blackbodyEmission * blackbody_color * Tr;
+            L += emission * dl;
             pMarch += rayDir*dl;
-        }  
+        }
     }
 
     L += Tr * Lbackground;
-    
-    gbuf_rad = vec4(L, 1.0);
+
+    // apply gamma correction to convert linear RGB to sRGB
+    L = pow(L, vec3(invGamma));
+    L *= pow(2.0, exposure);
+
+    vec2 f = frag/resolution.xy;
+    gbuf_rad = vec4(L, 1.0); //vec4(f.r, f.g, 0.0, 1.0);
 }
 
 

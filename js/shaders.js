@@ -3,87 +3,85 @@ var Shaders = {
 'advect-fragment-shader': `#version 300 es
 precision highp float;
 
-uniform sampler2D Qair;
-uniform sampler2D Qdust;
-
-uniform int Nr;
-uniform int Ny;
-uniform float volRadius;
-uniform float volHeight;
+uniform int N;
+uniform float dL;
 uniform float timestep;
+
 uniform float buoyancy;
-uniform float dustWeight;
+uniform float gravity;
 uniform float radiationLoss;
-uniform float T0;
+uniform float T0;       // reference temperature for buoyancy
+uniform float Tambient; // temperature which generates buoyancy which balances gravity
 
 in vec2 v_texcoord;
-out vec4 Qout;
 
-vec2 RK4(vec2 p)
+/////// input buffers ///////
+uniform sampler2D Vair_sampler; // 0, vec3 velocity field
+uniform sampler2D Pair_sampler; // 1, float pressure field
+uniform sampler2D Tair_sampler; // 2, float temperature field
+
+/////// output buffers ///////
+layout(location = 0) out vec4 Vair_output;
+layout(location = 1) out vec4 Pair_output;
+layout(location = 2) out vec4 Tair_output;
+
+
+vec3 mapFragToVs(in ivec2 frag)
 {
-    float h = timestep;
-    vec2 res = vec2(Nr, Ny);
+    // map fragment coord in [N*N, N] to continuous position of corresponding voxel center in voxel space
+    int iu = frag.x;
+    int iv = frag.y;
+    int k = iv;
+    int j = int(floor(float(iu)/float(N)));
+    int i = iu - N*j;
+    return vec3(ivec3(i, j, k)) + vec3(0.5);
+}
 
-    vec2 uv1 = p/res; 
-    vec2 k1 = texture(Qair, uv1).xy;
-
-    vec2 uv2 = (p - 0.5*h*k1)/res; uv2.x = abs(uv2.x);
-    vec2 k2 = texture(Qair, uv2).xy;
-
-    vec2 uv3 = (p - 0.5*h*k2)/res; uv3.x = abs(uv3.x);
-    vec2 k3 = texture(Qair, uv3).xy;
-
-    vec2 uv4 = (p - h*k3)/res; uv4.x = abs(uv3.x);
-    vec2 k4 = texture(Qair, uv4).xy;
-
-    return h/6.0 * (k1 + 2.0*k2 + 2.0*k3 + k4);
+vec4 interp(in sampler2D S, in vec3 wsP)
+{
+    vec3 vsP = wsP / dL;
+    float pY = vsP.y - 0.5;
+    int jlo = clamp(int(floor(pY)), 0, N-1); // lower j-slice
+    int jhi = clamp(         jlo+1, 0, N-1); // upper j-slice
+    float flo = float(jhi) - pY;             // lower j fraction
+    float fhi = 1.0 - flo;                   // upper j fraction
+    vec2 resolution = vec2(float(N*N), float(N)); // @todo: precompute
+    float v = vsP.z / resolution.y;
+    float ulo = (vsP.x + float(jlo)*float(N)) / resolution.x;
+    float uhi = (vsP.x + float(jhi)*float(N)) / resolution.x;
+    vec4 Slo = texture(S, vec2(ulo, v));
+    vec4 Shi = texture(S, vec2(uhi, v));
+    return flo*Slo + fhi*Shi;
 }
 
 void main()
 {
-    ivec2 X = ivec2(gl_FragCoord.xy);
-    int ir = X.x;
-    int iy = X.y;
+    // fragment range over [N*N, N] space
+    ivec2 frag = ivec2(gl_FragCoord.xy);
+    vec3 vsX = mapFragToVs(frag);
+    vec3 wsX = vsX*dL;
 
-    // Axis boundary condition 
-    // (on symmetry axis, the cells are updated to match the adjacent column,
-    //  except for the radial velocity, which is zeroed)
-    if (ir==0) X.x = 1;
-        
-    // Current frame air variables (vr, vy, T, p)
-    vec4 Q = texelFetch(Qair, X, 0);
-    
-    // Semi-Lagrangian advection 
-    vec2 C = gl_FragCoord.xy;
-    vec2 res = vec2(Nr, Ny);
-    vec4 Q_advect = texture(Qair, (C - RK4(C))/res);
-    float vr = Q_advect.r;
-    float vy = Q_advect.g;
-    float  T = Q_advect.b;
-    float  p = Q_advect.a;
+    // Apply semi-Lagrangian advection
+    vec3 v0  = texelFetch(Vair_sampler, frag, 0).xyz;
+    vec3 wsXp = wsX - v0*timestep; // @todo: implement RK4
+    vec3  v = interp(Vair_sampler, wsXp).xyz;
+    float P = interp(Pair_sampler, wsXp).x;
+    float T = interp(Tair_sampler, wsXp).x;
 
-    // Apply cooling due to "radiation loss"
-    float DT = T - T0;
-    if (DT > 0.0)
-    {   
-        DT *= exp(-radiationLoss);
-        T = T0 + DT;
-    }
+    // Apply thermal relaxation to ambient temperature due to "radiation loss"
+    T *= exp(-radiationLoss);
 
-    // Apply external force
-    vec4 Qdust_ = texelFetch(Qdust, X, 0);
-    float fy = timestep * (buoyancy*DT - dustWeight*Qdust_.r);
-    vy += fy;
+    // Apply gravity + buoyancy force
+    float buoyancy_expansion = buoyancy*(T - T0);
+    v.y += timestep * gravity * (1.0 - buoyancy_expansion);
 
-    // Apply boundary conditions
-    if (ir==0) vr = 0.0;     // axis boundary condition at r=0
-    if (iy==0) vy = abs(vy); // solid boundary condition at y=0
+    // Apply solid boundary condition at y=0
+    ivec3 vsI = ivec3(vsX);
+    if (vsI.y==0) v.y = abs(v.y);
 
-    // vy advected + y-force
-    Qout.r = vr;
-    Qout.g = vy;
-    Qout.b = T;
-    Qout.a = p;
+    Vair_output = vec4(v, 0.0);
+    Pair_output = vec4(P);
+    Tair_output = vec4(T);
 }
 `,
 
@@ -105,13 +103,17 @@ void main()
 'copy-fragment-shader': `#version 300 es
 precision highp float;
 
+/////// input buffers ///////
 uniform sampler2D Qin;
-out vec4 Qcopy;
+
+/////// output buffers ///////
+layout(location = 0) out vec4 Qcopy;
+
 
 void main()
 {
-    ivec2 X = ivec2(gl_FragCoord.xy);
-    Qcopy = texelFetch(Qin, X,    0);
+    ivec2 frag = ivec2(gl_FragCoord.xy);
+    Qcopy = texelFetch(Qin, frag, 0);
 }
 `,
 
@@ -130,49 +132,62 @@ void main()
 'debris-fragment-shader': `#version 300 es
 precision highp float;
 
-uniform sampler2D Qdebris;
-uniform sampler2D Qair;
-
-uniform int Nr;
-uniform int Ny;
-uniform float volRadius;
-uniform float volHeight;
+uniform int N;
+uniform float dL;
 uniform float timestep;
 
 in vec2 v_texcoord;
-out vec4 Qout;
 
-vec2 RK4(vec2 p)
+/////// input buffers ///////
+uniform sampler2D debris_sampler; // 0, float debris density field
+uniform sampler2D Vair_sampler;   // 1, vec3 velocity field
+
+/////// output buffers ///////
+layout(location = 0) out vec4 debris_output;
+
+vec3 mapFragToVs(in ivec2 frag)
 {
-    float h = timestep;
-    vec2 res = vec2(Nr, Ny);
+    // map fragment coord in [N*N, N] to continuous position of corresponding voxel center in voxel space
+    int iu = frag.x;
+    int iv = frag.y;
+    int k = iv;
+    int j = int(floor(float(iu)/float(N)));
+    int i = iu - N*j;
+    return vec3(ivec3(i, j, k)) + vec3(0.5);
+}
 
-    vec2 uv1 = p/res; 
-    vec2 k1 = texture(Qair, uv1).xy;
-
-    vec2 uv2 = (p - 0.5*h*k1)/res; uv2.x = abs(uv2.x);
-    vec2 k2 = texture(Qair, uv2).xy;
-
-    vec2 uv3 = (p - 0.5*h*k2)/res; uv3.x = abs(uv3.x);
-    vec2 k3 = texture(Qair, uv3).xy;
-
-    vec2 uv4 = (p - h*k3)/res; uv4.x = abs(uv3.x);
-    vec2 k4 = texture(Qair, uv4).xy;
-
-    return h/6.0 * (k1 + 2.0*k2 + 2.0*k3 + k4);
+vec4 interp(in sampler2D S, in vec3 wsP)
+{
+    vec3 vsP = wsP / dL;
+    float pY = vsP.y - 0.5;
+    int jlo = clamp(int(floor(pY)), 0, N-1); // lower j-slice
+    int jhi = clamp(         jlo+1, 0, N-1); // upper j-slice
+    float flo = float(jhi) - pY;             // lower j fraction
+    float fhi = 1.0 - flo;                   // upper j fraction
+    vec2 resolution = vec2(float(N*N), float(N)); // @todo: precompute
+    float v = vsP.z / resolution.y;
+    float ulo = (vsP.x + float(jlo)*float(N)) / resolution.x;
+    float uhi = (vsP.x + float(jhi)*float(N)) / resolution.x;
+    vec4 Slo = texture(S, vec2(ulo, v));
+    vec4 Shi = texture(S, vec2(uhi, v));
+    return flo*Slo + fhi*Shi;
 }
 
 void main()
 {
-    ivec2 X = ivec2(gl_FragCoord.xy);
-    vec4 Qair_ = texelFetch(Qair, X, 0);
-    float vr = Qair_.r; // in voxels/timestep
-    float vy = Qair_.g; // in voxels/timestep
+    // fragment range over [N*N, N] space
+    ivec2 frag = ivec2(gl_FragCoord.xy);
+    vec3 vsX = mapFragToVs(frag);
+    vec3 wsX = vsX*dL;
 
-     // Semi-Lagrangian advection 
-    vec2 C = gl_FragCoord.xy;
-    vec2 res = vec2(Nr, Ny);
-    Qout = texture(Qdebris, (C - RK4(C))/res);
+    // Current voxel air velocity
+    vec3 v0 = texelFetch(Vair_sampler, frag, 0).rgb;
+
+    // Apply semi-Lagrangian advection
+    float h = timestep;
+    vec3 wsXp = wsX - v0*h; // @todo: implement RK4
+    vec3 debris_p = interp(debris_sampler, wsXp).rgb;
+    debris_output = vec4(debris_p, 1.0);
 }
 `,
 
@@ -194,32 +209,63 @@ void main()
 'div-fragment-shader': `#version 300 es
 precision highp float;
 
-uniform sampler2D Qin;
+uniform int N;
+uniform float dL;
 
-uniform int Nr;
-uniform int Ny;
+/////// input buffers ///////
+uniform sampler2D Vair_sampler; // 0, vec3 velocity field
 
-out vec4 Qout;
+/////// output buffers ///////
+layout(location = 0) out vec4 divVair_output;
+
+
+vec3 mapFragToVs(in ivec2 frag)
+{
+    // map fragment coord in [N*N, N] to continuous position of corresponding voxel center in voxel space
+    int iu = frag.x;
+    int iv = frag.y;
+    int k = iv;
+    int j = int(floor(float(iu)/float(N)));
+    int i = iu - N*j;
+    return vec3(ivec3(i, j, k)) + vec3(0.5);
+}
+
+ivec2 mapVsToFrag(in ivec3 vsP)
+{
+    // map integer voxel space coords to the corresponding fragment coords
+    int i = vsP.x;
+    int j = vsP.y;
+    int k = vsP.z;
+    int ui = N*j + i;
+    int vi = k;
+    return ivec2(ui, vi);
+}
 
 void main()
 {
-    ivec2 X = ivec2(gl_FragCoord.xy);
-    int ir = X.x;
-    int iy = X.y;
+    ivec2 frag = ivec2(gl_FragCoord.xy);
+    ivec3 vsX = ivec3(mapFragToVs(frag));
+    int ix = vsX.x;
+    int iy = vsX.y;
+    int iz = vsX.z;
 
-    // Neumann boundary conditions
-    ivec2 X_rp = ivec2(min(ir+1, Nr-1), iy);
-    ivec2 X_rn = ivec2(max(ir-1, 0),    iy);
-    ivec2 X_yp = ivec2(ir, min(iy+1, Ny-1));
-    ivec2 X_yn = ivec2(ir, max(iy-1, 0));
+    // Apply Neumann boundary conditions
+    ivec2 X_ip = mapVsToFrag(ivec3(min(ix+1, N-1), iy, iz));
+    ivec2 X_in = mapVsToFrag(ivec3(max(ix-1, 0),   iy, iz));
+    ivec2 X_jp = mapVsToFrag(ivec3(ix, min(iy+1, N-1), iz));
+    ivec2 X_jn = mapVsToFrag(ivec3(ix, max(iy-1, 0),   iz));
+    ivec2 X_kp = mapVsToFrag(ivec3(ix, iy, min(iz+1, N-1)));
+    ivec2 X_kn = mapVsToFrag(ivec3(ix, iy, max(iz-1, 0)  ));
 
-    vec4 Q_rp = texelFetch(Qin, X_rp, 0);
-    vec4 Q_rn = texelFetch(Qin, X_rn, 0);
-    vec4 Q_yp = texelFetch(Qin, X_yp, 0);
-    vec4 Q_yn = texelFetch(Qin, X_yn, 0);
+    vec4 V_xp = texelFetch(Vair_sampler, X_ip, 0);
+    vec4 V_xn = texelFetch(Vair_sampler, X_in, 0);
+    vec4 V_yp = texelFetch(Vair_sampler, X_jp, 0);
+    vec4 V_yn = texelFetch(Vair_sampler, X_jn, 0);
+    vec4 V_zp = texelFetch(Vair_sampler, X_kp, 0);
+    vec4 V_zn = texelFetch(Vair_sampler, X_kn, 0);
 
-    float divv = 0.5 * (Q_rp.r - Q_rn.r + Q_yp.g - Q_yn.g);
-    Qout.r = divv;    
+    float divVair = 0.5 * (V_xp.x - V_xn.x + V_yp.y - V_yn.y + V_zp.z - V_zn.z) / dL;
+    divVair_output = vec4(divVair);
 }
 `,
 
@@ -264,51 +310,82 @@ void main()
 'project-fragment-shader': `#version 300 es
 precision highp float;
 
-uniform sampler2D Qin;
-uniform sampler2D div;
-
-uniform int Nr;
-uniform int Ny;
-uniform float volRadius;
-uniform float volHeight;
+uniform int N;
+uniform float dL;
 uniform float timestep;
 uniform float expansion;
 
-out vec4 Qout;
+/////// input buffers ///////
+uniform sampler2D Pair_sampler;    // 0, float pressure field
+uniform sampler2D Tair_sampler;    // 1, float temperature field
+uniform sampler2D divVair_sampler; // 2, float divergence field
+
+/////// output buffers ///////
+layout(location = 0) out vec4 Pair_output;
+
+
+vec3 mapFragToVs(in ivec2 frag)
+{
+    // map fragment coord in [N*N, N] to continuous position of corresponding voxel center in voxel space
+    int iu = frag.x;
+    int iv = frag.y;
+    int k = iv;
+    int j = int(floor(float(iu)/float(N)));
+    int i = iu - N*j;
+    return vec3(ivec3(i, j, k)) + vec3(0.5);
+}
+
+ivec2 mapVsToFrag(in ivec3 vsP)
+{
+    // map integer voxel space coords to the corresponding fragment coords
+    int i = vsP.x;
+    int j = vsP.y;
+    int k = vsP.z;
+    int ui = N*j + i;
+    int vi = k;
+    return ivec2(ui, vi);
+}
 
 void main()
 {
-    ivec2 X = ivec2(gl_FragCoord.xy);
-    int ir = X.x;
-    int iy = X.y;
-    
-    // Neumann boundary conditions
-    ivec2 X_rp = ivec2(min(ir+1, Nr-1), iy);
-    ivec2 X_rn = ivec2(max(ir-1, 0),    iy);
-    ivec2 X_yp = ivec2(ir, min(iy+1, Ny-1));
-    ivec2 X_yn = ivec2(ir, max(iy-1, 0));
+    ivec2 frag = ivec2(gl_FragCoord.xy);
+    ivec3 vsX = ivec3(mapFragToVs(frag));
+    int ix = vsX.x;
+    int iy = vsX.y;
+    int iz = vsX.z;
 
-    // Get pressure stencil
-    vec4 Q = texelFetch(Qin, X, 0);
-    Qout = Q;
+    // Apply Neumann boundary conditions
+    ivec2 X_ip = mapVsToFrag(ivec3(min(ix+1, N-1), iy, iz));
+    ivec2 X_in = mapVsToFrag(ivec3(max(ix-1, 0),   iy, iz));
+    ivec2 X_jp = mapVsToFrag(ivec3(ix, min(iy+1, N-1), iz));
+    ivec2 X_jn = mapVsToFrag(ivec3(ix, max(iy-1, 0),   iz));
+    ivec2 X_kp = mapVsToFrag(ivec3(ix, iy, min(iz+1, N-1)));
+    ivec2 X_kn = mapVsToFrag(ivec3(ix, iy, max(iz-1, 0)  ));
 
-    // Read divergence
-    float divv = texelFetch(div, X, 0).x;
+    // Get air pressure, temperature and velocity divergence at voxel
+    float P    = texelFetch(Pair_sampler, frag, 0).x;
+    float T    = texelFetch(Tair_sampler, frag, 0).x;
+    float divv = texelFetch(divVair_sampler, frag, 0).x;
 
     // Introduce local expansion due to heated fluid
-    float  T = Q.b;
-    float phi = timestep/float(Nr) * expansion * T;
+    float phi = timestep/float(N) * expansion * T;
     divv -= phi;
 
-    // Update local pressure according to Poisson equation (in cylindrical polars)
-    vec4 Q_rp = texelFetch(Qin, X_rp, 0);
-    vec4 Q_rn = texelFetch(Qin, X_rn, 0);
-    vec4 Q_yp = texelFetch(Qin, X_yp, 0);
-    vec4 Q_yn = texelFetch(Qin, X_yn, 0);
-    float avgp = 0.25*(Q_rp.a + Q_rn.a + Q_yp.a + Q_yn.a);
-    float r = (0.5 + float(ir));
-    float pressure = avgp - 0.25*divv + 0.125*(Q_rp.a - Q_rn.a)/r;
-    Qout.a = pressure; 
+    // Get pressure values at local stencil
+    float P_xp = texelFetch(Pair_sampler, X_ip, 0).r;
+    float P_xn = texelFetch(Pair_sampler, X_in, 0).r;
+    float P_yp = texelFetch(Pair_sampler, X_jp, 0).r;
+    float P_yn = texelFetch(Pair_sampler, X_jn, 0).r;
+    float P_zp = texelFetch(Pair_sampler, X_kp, 0).r;
+    float P_zn = texelFetch(Pair_sampler, X_kn, 0).r;
+
+    // Thus compute Jacobi-relaxation solution of Poisson equation:
+    //   Laplacian[p] = Divergence[v] / timestep
+    float rhs = divv; // / timestep;
+    float avgp = (P_xp + P_xn + P_yp + P_yn + P_zp + P_zn) / 6.0;
+    float P_relax = avgp - dL*dL*rhs/6.0; // (See Numerical Recipes 19.5.5, extended to 3d)
+
+    Pair_output = vec4(P_relax);
 }
 `,
 
@@ -382,13 +459,13 @@ void main()
 
     float T = Qair_.b;
     vec3 blackbody_color = tempToRGB(T/T0 * 300.0);
-    
+
     vec3 emission = blackbodyEmission * pow((T-T0)/T0, 4.0) * blackbody_color;
     vec3 sigma = debrisExtinction * Qdebris_.r * vec3(Qdebris_.g, Qdebris_.b, Qdebris_.a);
 
     vec3 L0 = vec3(0.5, 0.6, 0.9);
     vec3 L = (L0 + emission) * exp(-sigma);
- 
+
     // apply gamma correction to convert linear RGB to sRGB
     L = pow(L, vec3(invGamma));
     L *= pow(2.0, exposure);
@@ -499,45 +576,73 @@ void main()
 'update-fragment-shader': `#version 300 es
 precision highp float;
 
-uniform sampler2D Qin;
+uniform int N;
+uniform float dL;
+uniform float timestep;
 
-uniform int Nr;
-uniform int Ny;
-uniform float volRadius;
-uniform float volHeight;
+/////// input buffers ///////
+uniform sampler2D Vair_sampler; // 0, vec3 velocity field
+uniform sampler2D Pair_sampler; // 1, float pressure field
 
-out vec4 Qout;
+/////// output buffers ///////
+layout(location = 0) out vec4 Vair_output;
+
+vec3 mapFragToVs(in ivec2 frag)
+{
+    // map fragment coord in [N*N, N] to continuous position of corresponding voxel center in voxel space
+    int iu = frag.x;
+    int iv = frag.y;
+    int k = iv;
+    int j = int(floor(float(iu)/float(N)));
+    int i = iu - N*j;
+    return vec3(ivec3(i, j, k)) + vec3(0.5);
+}
+
+ivec2 mapVsToFrag(in ivec3 vsP)
+{
+    // map integer voxel space coords to the corresponding fragment coords
+    int i = vsP.x;
+    int j = vsP.y;
+    int k = vsP.z;
+    int ui = N*j + i;
+    int vi = k;
+    return ivec2(ui, vi);
+}
 
 void main()
 {
     // Setup local stencil:
-    ivec2 X = ivec2(gl_FragCoord.xy);
-    int ir = X.x;
-    int iy = X.y;
+    ivec2 frag = ivec2(gl_FragCoord.xy);
+    ivec3 vsX = ivec3(mapFragToVs(frag));
+    int ix = vsX.x;
+    int iy = vsX.y;
+    int iz = vsX.z;
 
-    // Neumann boundary conditions
-    ivec2 X_rp = ivec2(min(ir+1, Nr-1), iy);
-    ivec2 X_rn = ivec2(max(ir-1, 0),    iy);
-    ivec2 X_yp = ivec2(ir, min(iy+1, Ny-1));
-    ivec2 X_yn = ivec2(ir, max(iy-1, 0));
+    // Apply Neumann boundary conditions
+    ivec2 X_ip = mapVsToFrag(ivec3(min(ix+1, N-1), iy, iz));
+    ivec2 X_in = mapVsToFrag(ivec3(max(ix-1, 0),   iy, iz));
+    ivec2 X_jp = mapVsToFrag(ivec3(ix, min(iy+1, N-1), iz));
+    ivec2 X_jn = mapVsToFrag(ivec3(ix, max(iy-1, 0),   iz));
+    ivec2 X_kp = mapVsToFrag(ivec3(ix, iy, min(iz+1, N-1)));
+    ivec2 X_kn = mapVsToFrag(ivec3(ix, iy, max(iz-1, 0)  ));
 
-    // Compute gradient of pressure field
-    vec4 Q    = texelFetch(Qin, X,    0);
-    vec4 Q_rp = texelFetch(Qin, X_rp, 0);
-    vec4 Q_rn = texelFetch(Qin, X_rn, 0);
-    vec4 Q_yp = texelFetch(Qin, X_yp, 0);
-    vec4 Q_yn = texelFetch(Qin, X_yn, 0);
-    float dpdr = 0.5*(Q_rp.a - Q_rn.a);
-    float dpdy = 0.5*(Q_yp.a - Q_yn.a);
+    // air velocity at voxel
+    vec3 v = texelFetch(Vair_sampler, frag, 0).rgb;
 
-    // Update velocity accordingly
-    Qout.r = Q.r - dpdr;
-    Qout.g = Q.g - dpdy;
+    // Compute local gradient of pressure field
+    float P_xp = texelFetch(Pair_sampler, X_ip, 0).r;
+    float P_xn = texelFetch(Pair_sampler, X_in, 0).r;
+    float P_yp = texelFetch(Pair_sampler, X_jp, 0).r;
+    float P_yn = texelFetch(Pair_sampler, X_jn, 0).r;
+    float P_zp = texelFetch(Pair_sampler, X_kp, 0).r;
+    float P_zn = texelFetch(Pair_sampler, X_kn, 0).r;
+    float dpdx = 0.5*(P_xp - P_xn)/dL;
+    float dpdy = 0.5*(P_yp - P_yn)/dL;
+    float dpdz = 0.5*(P_zp - P_zn)/dL;
+    vec3 gradp = vec3(dpdx, dpdy, dpdz);
 
-    // Axis boundary condition 
-    if (ir==0) Qout.r = 0.0;//abs(Qout.r);
-
-    Qout.ba = Q.ba;
+    // Update air velocity accordingly
+    Vair_output = vec4(v - timestep*gradp, 0.0);
 }
 `,
 
@@ -558,8 +663,6 @@ precision highp float;
 
 in vec2 vTexCoord;
 
-layout(location = 0) out vec4 gbuf_rad;
-
 uniform vec2 resolution;
 uniform vec3 camPos;
 uniform vec3 camDir;
@@ -570,18 +673,24 @@ uniform float camAspect;
 uniform vec3 volMin;
 uniform vec3 volMax;
 uniform vec3 volCenter;
-uniform float volRadius;
-uniform float volHeight;
-uniform int Nr;
-uniform int Ny;
+
+uniform int N;
+uniform float dL;
 uniform int Nraymarch;
 
-uniform float extinctionMultiplier;
-uniform float emissionMultiplier;
-uniform float tempMultiplier;
+uniform float debrisExtinction;
+uniform float blackbodyEmission;
+uniform float TtoKelvin;
+uniform float exposure;
+uniform float invGamma;
 
-uniform sampler2D Qair;    // air simulation
-uniform sampler2D Qdebris; // debris simulation
+/////// input buffers ///////
+uniform sampler2D debris_sampler; // 0, float debris density field
+uniform sampler2D Tair_sampler;   // 1, float temperature field
+uniform sampler2D Vair_sampler;   // 2, vec3 velocity field (for debug, for now)
+
+/////// output buffers ///////
+layout(location = 0) out vec4 gbuf_rad;
 
 #define DENOM_EPS 1.0e-7
 #define sort2(a,b) { vec3 tmp=min(a,b); b=a+b-tmp; a=tmp; }
@@ -589,9 +698,9 @@ uniform sampler2D Qdebris; // debris simulation
 bool boundsIntersect( in vec3 rayPos, in vec3 rayDir, in vec3 bbMin, in vec3 bbMax,
                       inout float t0, inout float t1 )
 {
-    vec3 dL = vec3(1.0f/rayDir.x, 1.0f/rayDir.y, 1.0f/rayDir.z);
-    vec3 lo = (bbMin - rayPos) * dL;
-    vec3 hi = (bbMax - rayPos) * dL;
+    vec3 dX = vec3(1.0f/rayDir.x, 1.0f/rayDir.y, 1.0f/rayDir.z);
+    vec3 lo = (bbMin - rayPos) * dX;
+    vec3 hi = (bbMax - rayPos) * dX;
     sort2(lo, hi);
     bool hit = !( lo.x>hi.y || lo.y>hi.x || lo.x>hi.z || lo.z>hi.x || lo.y>hi.z || lo.z>hi.y );
     t0 = max(max(lo.x, lo.y), lo.z);
@@ -599,11 +708,11 @@ bool boundsIntersect( in vec3 rayPos, in vec3 rayDir, in vec3 bbMin, in vec3 bbM
     return hit;
 }
 
-void constructPrimaryRay(in vec2 pixel,
+void constructPrimaryRay(in vec2 frag,
                          inout vec3 rayPos, inout vec3 rayDir)
 {
     // Compute world ray direction for given (possibly jittered) fragment
-    vec2 ndc = -1.0 + 2.0*(pixel/resolution.xy);
+    vec2 ndc = -1.0 + 2.0*(frag/resolution.xy);
     float fh = tan(0.5*radians(camFovy)); // frustum height
     float fw = camAspect*fh;
     vec3 s = -fw*ndc.x*camX + fh*ndc.y*camY;
@@ -639,11 +748,39 @@ vec3 tempToRGB(float T_kelvin)
     return vec3(R, G, B);
 }
 
+vec4 interp(in sampler2D S, in vec3 wsP)
+{
+    vec3 vsP = wsP / dL;
+    float pY = vsP.y - 0.5;
+    int jlo = clamp(int(floor(pY)), 0, N-1); // lower j-slice
+    int jhi = clamp(         jlo+1, 0, N-1); // upper j-slice
+    float flo = float(jhi) - pY;             // lower j fraction
+    float fhi = 1.0 - flo;                   // upper j fraction
+    vec2 resolution = vec2(float(N*N), float(N)); // @todo: precompute
+    float v = vsP.z / resolution.y;
+    float ulo = (vsP.x + float(jlo)*float(N)) / resolution.x;
+    float uhi = (vsP.x + float(jhi)*float(N)) / resolution.x;
+    vec4 Slo = texture(S, vec2(ulo, v));
+    vec4 Shi = texture(S, vec2(uhi, v));
+    return flo*Slo + fhi*Shi;
+}
+
+ivec2 mapVsToFrag(in ivec3 vsP)
+{
+    // map integer voxel space coords to the corresponding fragment coords
+    int i = vsP.x;
+    int j = vsP.y;
+    int k = vsP.z;
+    int ui = N*j + i;
+    int vi = k;
+    return ivec2(ui, vi);
+}
+
 void main()
 {
-    vec2 pixel = gl_FragCoord.xy;
+    vec2 frag = gl_FragCoord.xy;
     vec3 rayPos, rayDir;
-    constructPrimaryRay(pixel, rayPos, rayDir);
+    constructPrimaryRay(frag, rayPos, rayDir);
 
     vec3 L = vec3(0.0);
     vec3 Lbackground = vec3(0.2, 0.25, 0.5);
@@ -658,39 +795,38 @@ void main()
         vec3 pMarch = rayPos + (t0+0.5*dl)*rayDir;
 
         for (int n=0; n<Nraymarch; ++n)
-        {   
+        {
             // transform pMarch into simulation domain:
-            float y = pMarch.y - volMin.y;
-            float r = length((pMarch - volCenter).xz);
-            if (r<=volRadius)
-            {
-                int ir = clamp(int(floor(r)), 0, Nr-1);
-                int iy = clamp(int(floor(y)), 0, Ny-1);
-                float u = r/volRadius;
-                float v = y/volHeight;
+            vec3 wsP = pMarch - volMin;
+            ivec3 vsP = ivec3(wsP / dL);
+            //vec3 debris = texelFetch(debris_sampler, mapVsToFrag(vsP), 0).rgb;
 
-                // Absorption by dust
-                vec4 Qdebris_  = texture(Qdebris, vec2(u, v));
-                vec3 sigma = extinctionMultiplier * Qdebris_.r * vec3(Qdebris_.g, Qdebris_.b, Qdebris_.a);
-                Tr.r *= exp(-sigma.r*dl);
-                Tr.g *= exp(-sigma.g*dl);
-                Tr.b *= exp(-sigma.b*dl);
+            // Absorption by dust
+            vec3 debris = interp(debris_sampler, wsP).rgb;
 
-                // Emit blackbody radiation from hot air
-                vec4 Qair_ = texture(Qair, vec2(u, v));
-                float T = tempMultiplier * Qair_.b;
-                vec3 blackbody_color = tempToRGB(T * 300.0 * tempMultiplier);
-                vec3 emission = Tr * emissionMultiplier * 0.001 * T * blackbody_color;
-            
-                L += emission * dl;
-            }
+            vec3 debris_color = vec3(1.0, 1.0, 1.0); // @todo: advect colored absorption/scattering coefficient fields of debris
+            vec3 sigma = debrisExtinction * debris_color * debris;
+            Tr.r *= exp(-sigma.r*dl);
+            Tr.g *= exp(-sigma.g*dl);
+            Tr.b *= exp(-sigma.b*dl);
+
+            // Emit blackbody radiation from hot air
+            float T = interp(Tair_sampler, wsP).r;
+            vec3 blackbody_color = tempToRGB(T * TtoKelvin);
+            vec3 emission = blackbodyEmission * blackbody_color * Tr;
+            L += emission * dl;
             pMarch += rayDir*dl;
-        }  
+        }
     }
 
     L += Tr * Lbackground;
-    
-    gbuf_rad = vec4(L, 1.0);
+
+    // apply gamma correction to convert linear RGB to sRGB
+    L = pow(L, vec3(invGamma));
+    L *= pow(2.0, exposure);
+
+    vec2 f = frag/resolution.xy;
+    gbuf_rad = vec4(L, 1.0); //vec4(f.r, f.g, 0.0, 1.0);
 }
 `,
 

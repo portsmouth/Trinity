@@ -1,48 +1,61 @@
 precision highp float;
 
-uniform sampler2D Qdebris;
-uniform sampler2D Qair;
-
-uniform int Nr;
-uniform int Ny;
-uniform float volRadius;
-uniform float volHeight;
+uniform int N;
+uniform float dL;
 uniform float timestep;
 
 in vec2 v_texcoord;
-out vec4 Qout;
 
-vec2 RK4(vec2 p)
+/////// input buffers ///////
+uniform sampler2D debris_sampler; // 0, float debris density field
+uniform sampler2D Vair_sampler;   // 1, vec3 velocity field
+
+/////// output buffers ///////
+layout(location = 0) out vec4 debris_output;
+
+vec3 mapFragToVs(in ivec2 frag)
 {
-    float h = timestep;
-    vec2 res = vec2(Nr, Ny);
+    // map fragment coord in [N*N, N] to continuous position of corresponding voxel center in voxel space
+    int iu = frag.x;
+    int iv = frag.y;
+    int k = iv;
+    int j = int(floor(float(iu)/float(N)));
+    int i = iu - N*j;
+    return vec3(ivec3(i, j, k)) + vec3(0.5);
+}
 
-    vec2 uv1 = p/res; 
-    vec2 k1 = texture(Qair, uv1).xy;
-
-    vec2 uv2 = (p - 0.5*h*k1)/res; uv2.x = abs(uv2.x);
-    vec2 k2 = texture(Qair, uv2).xy;
-
-    vec2 uv3 = (p - 0.5*h*k2)/res; uv3.x = abs(uv3.x);
-    vec2 k3 = texture(Qair, uv3).xy;
-
-    vec2 uv4 = (p - h*k3)/res; uv4.x = abs(uv3.x);
-    vec2 k4 = texture(Qair, uv4).xy;
-
-    return h/6.0 * (k1 + 2.0*k2 + 2.0*k3 + k4);
+vec4 interp(in sampler2D S, in vec3 wsP)
+{
+    vec3 vsP = wsP / dL;
+    float pY = vsP.y - 0.5;
+    int jlo = clamp(int(floor(pY)), 0, N-1); // lower j-slice
+    int jhi = clamp(         jlo+1, 0, N-1); // upper j-slice
+    float flo = float(jhi) - pY;             // lower j fraction
+    float fhi = 1.0 - flo;                   // upper j fraction
+    vec2 resolution = vec2(float(N*N), float(N)); // @todo: precompute
+    float v = vsP.z / resolution.y;
+    float ulo = (vsP.x + float(jlo)*float(N)) / resolution.x;
+    float uhi = (vsP.x + float(jhi)*float(N)) / resolution.x;
+    vec4 Slo = texture(S, vec2(ulo, v));
+    vec4 Shi = texture(S, vec2(uhi, v));
+    return flo*Slo + fhi*Shi;
 }
 
 void main()
 {
-    ivec2 X = ivec2(gl_FragCoord.xy);
-    vec4 Qair_ = texelFetch(Qair, X, 0);
-    float vr = Qair_.r; // in voxels/timestep
-    float vy = Qair_.g; // in voxels/timestep
+    // fragment range over [N*N, N] space
+    ivec2 frag = ivec2(gl_FragCoord.xy);
+    vec3 vsX = mapFragToVs(frag);
+    vec3 wsX = vsX*dL;
 
-     // Semi-Lagrangian advection 
-    vec2 C = gl_FragCoord.xy;
-    vec2 res = vec2(Nr, Ny);
-    Qout = texture(Qdebris, (C - RK4(C))/res);
+    // Current voxel air velocity
+    vec3 v0 = texelFetch(Vair_sampler, frag, 0).rgb;
+
+    // Apply semi-Lagrangian advection
+    float h = timestep;
+    vec3 wsXp = wsX - v0*h; // @todo: implement RK4
+    vec3 debris_p = interp(debris_sampler, wsXp).rgb;
+    debris_output = vec4(debris_p, 1.0);
 }
 
 

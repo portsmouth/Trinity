@@ -1,86 +1,84 @@
 precision highp float;
 
-uniform sampler2D Qair;
-uniform sampler2D Qdust;
-
-uniform int Nr;
-uniform int Ny;
-uniform float volRadius;
-uniform float volHeight;
+uniform int N;
+uniform float dL;
 uniform float timestep;
+
 uniform float buoyancy;
-uniform float dustWeight;
+uniform float gravity;
 uniform float radiationLoss;
-uniform float T0;
+uniform float T0;       // reference temperature for buoyancy
+uniform float Tambient; // temperature which generates buoyancy which balances gravity
 
 in vec2 v_texcoord;
-out vec4 Qout;
 
-vec2 RK4(vec2 p)
+/////// input buffers ///////
+uniform sampler2D Vair_sampler; // 0, vec3 velocity field
+uniform sampler2D Pair_sampler; // 1, float pressure field
+uniform sampler2D Tair_sampler; // 2, float temperature field
+
+/////// output buffers ///////
+layout(location = 0) out vec4 Vair_output;
+layout(location = 1) out vec4 Pair_output;
+layout(location = 2) out vec4 Tair_output;
+
+
+vec3 mapFragToVs(in ivec2 frag)
 {
-    float h = timestep;
-    vec2 res = vec2(Nr, Ny);
+    // map fragment coord in [N*N, N] to continuous position of corresponding voxel center in voxel space
+    int iu = frag.x;
+    int iv = frag.y;
+    int k = iv;
+    int j = int(floor(float(iu)/float(N)));
+    int i = iu - N*j;
+    return vec3(ivec3(i, j, k)) + vec3(0.5);
+}
 
-    vec2 uv1 = p/res; 
-    vec2 k1 = texture(Qair, uv1).xy;
-
-    vec2 uv2 = (p - 0.5*h*k1)/res; uv2.x = abs(uv2.x);
-    vec2 k2 = texture(Qair, uv2).xy;
-
-    vec2 uv3 = (p - 0.5*h*k2)/res; uv3.x = abs(uv3.x);
-    vec2 k3 = texture(Qair, uv3).xy;
-
-    vec2 uv4 = (p - h*k3)/res; uv4.x = abs(uv3.x);
-    vec2 k4 = texture(Qair, uv4).xy;
-
-    return h/6.0 * (k1 + 2.0*k2 + 2.0*k3 + k4);
+vec4 interp(in sampler2D S, in vec3 wsP)
+{
+    vec3 vsP = wsP / dL;
+    float pY = vsP.y - 0.5;
+    int jlo = clamp(int(floor(pY)), 0, N-1); // lower j-slice
+    int jhi = clamp(         jlo+1, 0, N-1); // upper j-slice
+    float flo = float(jhi) - pY;             // lower j fraction
+    float fhi = 1.0 - flo;                   // upper j fraction
+    vec2 resolution = vec2(float(N*N), float(N)); // @todo: precompute
+    float v = vsP.z / resolution.y;
+    float ulo = (vsP.x + float(jlo)*float(N)) / resolution.x;
+    float uhi = (vsP.x + float(jhi)*float(N)) / resolution.x;
+    vec4 Slo = texture(S, vec2(ulo, v));
+    vec4 Shi = texture(S, vec2(uhi, v));
+    return flo*Slo + fhi*Shi;
 }
 
 void main()
 {
-    ivec2 X = ivec2(gl_FragCoord.xy);
-    int ir = X.x;
-    int iy = X.y;
+    // fragment range over [N*N, N] space
+    ivec2 frag = ivec2(gl_FragCoord.xy);
+    vec3 vsX = mapFragToVs(frag);
+    vec3 wsX = vsX*dL;
 
-    // Axis boundary condition 
-    // (on symmetry axis, the cells are updated to match the adjacent column,
-    //  except for the radial velocity, which is zeroed)
-    if (ir==0) X.x = 1;
-        
-    // Current frame air variables (vr, vy, T, p)
-    vec4 Q = texelFetch(Qair, X, 0);
-    
-    // Semi-Lagrangian advection 
-    vec2 C = gl_FragCoord.xy;
-    vec2 res = vec2(Nr, Ny);
-    vec4 Q_advect = texture(Qair, (C - RK4(C))/res);
-    float vr = Q_advect.r;
-    float vy = Q_advect.g;
-    float  T = Q_advect.b;
-    float  p = Q_advect.a;
+    // Apply semi-Lagrangian advection
+    vec3 v0  = texelFetch(Vair_sampler, frag, 0).xyz;
+    vec3 wsXp = wsX - v0*timestep; // @todo: implement RK4
+    vec3  v = interp(Vair_sampler, wsXp).xyz;
+    float P = interp(Pair_sampler, wsXp).x;
+    float T = interp(Tair_sampler, wsXp).x;
 
-    // Apply cooling due to "radiation loss"
-    float DT = T - T0;
-    if (DT > 0.0)
-    {   
-        DT *= exp(-radiationLoss);
-        T = T0 + DT;
-    }
+    // Apply thermal relaxation to ambient temperature due to "radiation loss"
+    T *= exp(-radiationLoss);
 
-    // Apply external force
-    vec4 Qdust_ = texelFetch(Qdust, X, 0);
-    float fy = timestep * (buoyancy*DT - dustWeight*Qdust_.r);
-    vy += fy;
+    // Apply gravity + buoyancy force
+    float buoyancy_expansion = buoyancy*(T - T0);
+    v.y += timestep * gravity * (1.0 - buoyancy_expansion);
 
-    // Apply boundary conditions
-    if (ir==0) vr = 0.0;     // axis boundary condition at r=0
-    if (iy==0) vy = abs(vy); // solid boundary condition at y=0
+    // Apply solid boundary condition at y=0
+    ivec3 vsI = ivec3(vsX);
+    if (vsI.y==0) v.y = abs(v.y);
 
-    // vy advected + y-force
-    Qout.r = vr;
-    Qout.g = vy;
-    Qout.b = T;
-    Qout.a = p;
+    Vair_output = vec4(v, 0.0);
+    Pair_output = vec4(P);
+    Tair_output = vec4(T);
 }
 
 

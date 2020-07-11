@@ -6,13 +6,14 @@ var Renderer = function()
 	let gl = GLU.gl;
 
     // Default user-adjustable properties
-    this.exposure = 0.0;
+    this.exposure = -2.0;
     this.gamma = 2.2;
     this.colorA = [1.0,0.8,0.5];
     this.colorB = [1.0,0.8,0.5];
-    this.blackbodyEmission = 5.0;
+    this.blackbodyEmission = -1.0;
     this.debrisExtinction = 10.0;
     this.tempMultiplier = 1.0;
+    this.TtoKelvin = 4.0;
 
     // Internal buffers and programs
     this.boxVbo = null;
@@ -27,7 +28,6 @@ var Renderer = function()
     // Specify shaders
     this.shaderSources = GLU.resolveShaderSource({
         'volume'         : {'v': 'volume-vertex-shader',  'f': 'volume-fragment-shader'},
-        'slice'          : {'v': 'slice-vertex-shader',   'f': 'slice-fragment-shader'},
         'tonemap'        : {'v': 'tonemap-vertex-shader', 'f': 'tonemap-fragment-shader'},
         'line'           : {'v': 'line-vertex-shader',    'f': 'line-fragment-shader'}
     });
@@ -136,7 +136,6 @@ Renderer.prototype.reset = function(no_recompile = false)
 Renderer.prototype.compileShaders = function()
 {
 	this.volumeProgram  = new GLU.Shader('volume',  this.shaderSources, null);
-    this.sliceProgram  = new GLU.Shader('slice',  this.shaderSources, null);
 	this.lineProgram    = new GLU.Shader('line',    this.shaderSources, null);
 	this.tonemapProgram = new GLU.Shader('tonemap', this.shaderSources, null);
 }
@@ -146,11 +145,11 @@ Renderer.prototype.render = function(solver)
 	let gl = GLU.gl;
 
     gl.disable(gl.DEPTH_TEST);
-    gl.viewport(0.0, 0.0, solver.Nr, solver.Ny);
+    gl.viewport(0.0, 0.0, this._width, this._height);
 
 	gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-	
+
 	var camera = trinity.getCamera();
     var camPos = camera.position.clone();
     var camDir = camera.getWorldDirection();
@@ -159,41 +158,23 @@ Renderer.prototype.render = function(solver)
     var camX = new THREE.Vector3();
     camX.crossVectors(camUp, camDir);
 
-    let domain = solver.getDomain();   
-    let Qair    = solver.getQair();    // (the air simulation texture)
-    let Qdebris = solver.getQdebris(); // (the debris simulation texture)
-
-    // Slice render
-    {
-        this.sliceProgram.bind();
-
-        Qair.bind(0);
-        this.sliceProgram.uniformTexture("Qair", Qair); 
-
-        Qdebris.bind(1);
-        this.sliceProgram.uniformTexture("Qdebris", Qdebris); 
-
-        this.quadVbo.bind();
-        this.quadVbo.draw(this.sliceProgram, gl.TRIANGLE_FAN);
-
-        this.sliceProgram.uniform2Fv("resolution", [this._width, this._height]);
-        this.sliceProgram.uniformF("debrisExtinction", this.debrisExtinction);
-        this.sliceProgram.uniformF("blackbodyEmission", Math.pow(2.0, this.blackbodyEmission));
-        this.sliceProgram.uniformF("T0", domain.T0);
-        this.sliceProgram.uniformF("exposure", this.exposure);
-        this.sliceProgram.uniformF("invGamma", 1.0/this.gamma);
-    }
+    let domain = solver.getDomain();
+    let Vair   = solver.getVair();    // (the air velocity texture)
+    let Tair   = solver.getTair();    // (the air temperature texture)
+    let debris = solver.getDebris(); // (the debris density texture)
 
     // Volume render
-    /*
     {
         this.volumeProgram.bind();
 
-        Qair.bind(0);
-        this.volumeProgram.uniformTexture("Qair", Qair); 
+        debris.bind(0);
+        this.volumeProgram.uniformTexture("debris_sampler", debris);
 
-        Qdebris.bind(1);
-        this.volumeProgram.uniformTexture("Qdebris", Qdebris); 
+        Tair.bind(1);
+        this.volumeProgram.uniformTexture("Tair_sampler", Tair);
+
+        Vair.bind(2);
+        this.volumeProgram.uniformTexture("Vair_sampler", Vair);
 
         this.volumeProgram.uniform2Fv("resolution", [this._width, this._height]);
         this.volumeProgram.uniform3Fv("camPos", [camPos.x, camPos.y, camPos.z]);
@@ -205,51 +186,52 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniform3Fv("volMin", domain.boundsMin);
         this.volumeProgram.uniform3Fv("volMax", domain.boundsMax);
         this.volumeProgram.uniform3Fv("volCenter", domain.center);
-        this.volumeProgram.uniformF("volRadius", domain.radius);
-        this.volumeProgram.uniformF("volHeight", domain.height);
-        this.volumeProgram.uniformI("Nr", domain.Nr);
-        this.volumeProgram.uniformI("Ny", domain.Ny);
+
+        this.volumeProgram.uniformI("N", domain.N);
+        this.volumeProgram.uniformF("dL", domain.dL);
         this.volumeProgram.uniformI("Nraymarch", 256);
-        this.volumeProgram.uniformF("extinctionMultiplier", this.extinctionMultiplier);
-        this.volumeProgram.uniformF("emissionMultiplier", this.emissionMultiplier);
-        this.volumeProgram.uniformF("tempMultiplier", this.tempMultiplier);
-        
+
+        this.volumeProgram.uniformF("debrisExtinction", this.debrisExtinction);
+        this.volumeProgram.uniformF("blackbodyEmission", Math.pow(2.0, this.blackbodyEmission));
+        this.volumeProgram.uniformF("TtoKelvin", this.TtoKelvin);
+        this.volumeProgram.uniformF("exposure", this.exposure);
+        this.volumeProgram.uniformF("invGamma", 1.0/this.gamma);
+
         this.quadVbo.bind();
         this.quadVbo.draw(this.volumeProgram, gl.TRIANGLE_FAN);
     }
 
     // draw simulation bounds
     {
-    	this.lineProgram.bind();
+        this.lineProgram.bind();
 
-	    // Setup projection matrix
-		var projectionMatrix = camera.projectionMatrix.toArray();
-		var projectionMatrixLocation = this.lineProgram.getUniformLocation("u_projectionMatrix");
-		gl.uniformMatrix4fv(projectionMatrixLocation, false, projectionMatrix);
+        // Setup projection matrix
+        var projectionMatrix = camera.projectionMatrix.toArray();
+        var projectionMatrixLocation = this.lineProgram.getUniformLocation("u_projectionMatrix");
+        gl.uniformMatrix4fv(projectionMatrixLocation, false, projectionMatrix);
 
-		this.lineProgram.uniform3Fv("color", [1.0, 0.0, 0.0]);
+        this.lineProgram.uniform3Fv("color", [1.0, 0.0, 0.0]);
 
-		// Setup modelview matrix (to match camera)
-		camera.updateMatrixWorld();
-		var matrixWorldInverse = new THREE.Matrix4();
-		matrixWorldInverse.getInverse( camera.matrixWorld );
-		var modelViewMatrix = matrixWorldInverse.toArray();
-		var modelViewMatrixLocation = this.lineProgram.getUniformLocation("u_modelViewMatrix");
-		gl.uniformMatrix4fv(modelViewMatrixLocation, false, modelViewMatrix);
+        // Setup modelview matrix (to match camera)
+        camera.updateMatrixWorld();
+        var matrixWorldInverse = new THREE.Matrix4();
+        matrixWorldInverse.getInverse( camera.matrixWorld );
+        var modelViewMatrix = matrixWorldInverse.toArray();
+        var modelViewMatrixLocation = this.lineProgram.getUniformLocation("u_modelViewMatrix");
+        gl.uniformMatrix4fv(modelViewMatrixLocation, false, modelViewMatrix);
 
-		if (!this.boxVbo)
-		{
-			let o = domain.boundsMin;
+        if (!this.boxVbo)
+        {
+            let o = domain.boundsMin;
             let c = domain.boundsMax;
-			let extents = [c[0]-o[0], c[1]-o[1], c[2]-o[2]];
-			this.boxVbo = this.createBoxVbo(o, extents)
-		}
-		
-	    this.boxVbo.bind();
-	    this.boxVbo.draw(this.lineProgram, gl.LINES);
+            let extents = [c[0]-o[0], c[1]-o[1], c[2]-o[2]];
+            this.boxVbo = this.createBoxVbo(o, extents)
+        }
+
+        this.boxVbo.bind();
+        this.boxVbo.draw(this.lineProgram, gl.LINES);
     }
-    */
-    
+
     gl.finish();
 }
 

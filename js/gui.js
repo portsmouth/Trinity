@@ -9,7 +9,7 @@ var GUI = function(visible = true)
 	this.gui.domElement.id = 'gui';
 	var gui = this.gui;
 	this.visible = visible;
-	
+
 	this.createSimulationSettings();
 	this.createRendererSettings();
 	if (!visible)
@@ -60,7 +60,10 @@ GUI.prototype.createRendererSettings = function()
 	this.rendererFolder.add(renderer, 'gamma', 1.0, 3.0);
 
     this.rendererFolder.add(renderer, 'debrisExtinction', 0.0, 200.0);
-    this.rendererFolder.add(renderer, 'blackbodyEmission', -20.0, 20.0);
+	this.rendererFolder.add(renderer, 'blackbodyEmission', -20.0, 20.0);
+	
+	this.rendererFolder.add(renderer, 'TtoKelvin', 0.0, 1000.0);
+	
 
 	this.rendererFolder.colorA = [renderer.colorA[0]*255.0, renderer.colorA[1]*255.0, renderer.colorA[2]*255.0];
 	let itemA = this.rendererFolder.addColor(this.rendererFolder, 'colorA');
@@ -107,19 +110,17 @@ GUI.prototype.createSimulationSettings = function()
 
     this.simulationFolder = this.gui.addFolder('Simulation');
     
-
-    this.simulationFolder.add(solver, 'Nr', 32, 2048).onChange( function(Nr) { solver.resize(Nr, solver.Ny); } );
-    this.simulationFolder.add(solver, 'Ny', 32, 2048).onChange( function(Ny) { solver.resize(solver.Nr, Ny); } );
+    this.simulationFolder.add(solver, 'N', 32, 2048).onChange( function(N) { solver.resize(N); } );
     this.simulationFolder.add(solver, 'timestep', 0.0, 10.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'blastHeight', 0.0, 1.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'blastRadius', 0.0, 1.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'blastTemperature', 0.0, 100.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'blastVelocity', 0.0, 10.0).onChange( function() { solver.reset(); } );
+    this.simulationFolder.add(solver, 'blastVelocity', 0.0, 1000.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'debrisHeight', 0.0, 1.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'debrisFalloff', 0.0, 1.0).onChange( function() { solver.reset(); } );
+	this.simulationFolder.add(solver, 'debrisFalloff', 0.0, 1.0).onChange( function() { solver.reset(); } );
+	this.simulationFolder.add(solver, 'gravity', -1.0, 0.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'buoyancy', 0.0, 10.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'expansion', 0.0, 10.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'dustWeight', 0.0, 10.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'radiationLoss', 0.0, 1.0).onChange( function() { solver.reset(); } );
 
     let button = { nuke:function(){ solver.reset(); }};

@@ -19,37 +19,36 @@ var Solver = function()
     this.compileShaders();
 
     // Defaults
-    this.timestep = 1.0;
+    this.timestep = 0.3;
     this.blastHeight = 0.1;
-    this.blastRadius = 0.01;
-    this.blastTemperature = 2.0; // initial temperature of fireball relative to ambient
-    this.blastVelocity = 5.0;     // outward blast speed in voxels/timestep
-    this.debrisHeight = 0.3;      // maximum height of dust layer, as a fraction of domain height 
-    this.debrisFalloff = 0.5;     // fall-off exponent within dust layer
-    this.T0 = 1.0;                // nominal ambient temperature
-    this.buoyancy = 0.33;         // nominal buoyancy
-    this.expansion = 7.0;
-    this.dustWeight = 0.3;        // controls force of gravity on dust
-    this.radiationLoss = 0.08;    // radiation loss rate (per timestep fractional absorption)
+    this.blastRadius = 0.05;
+    this.blastTemperature = 100.0;  // initial temperature of fireball relative to ambient
+    this.blastVelocity = 50.0;    // outward blast speed in voxels/timestep
+    this.debrisHeight = 0.2;       // maximum height of dust layer, as a fraction of domain height
+    this.debrisFalloff = 0.01;      // fall-off exponent within dust layer
+    this.T0 = 1.0;                 // nominal reference temperature for buoyancy
+    this.buoyancy = 0.003;         // initial buoyancy (thermal expansion coeff. of air)
+    this.expansion = 0.001;
+    this.gravity = -1.0;
+    this.radiationLoss = 0.01;    // radiation loss rate (per timestep fractional absorption)
 
     // Initialize solver
-    this.resize(400, 1000);
+    this.resize(128);
 }
 
 Solver.prototype.compileShaders = function()
 {
-	this.advect       = new GLU.Shader('advect',        this.shaderSources, null);
-    this.project      = new GLU.Shader('project',       this.shaderSources, null);
-    this.div          = new GLU.Shader('div',           this.shaderSources, null);
-    this.copy         = new GLU.Shader('copy',          this.shaderSources, null);
-    this.update       = new GLU.Shader('update',        this.shaderSources, null);
-    this.debris       = new GLU.Shader('debris',        this.shaderSources, null);
+	this.advect_program       = new GLU.Shader('advect',        this.shaderSources, null);
+    this.project_program      = new GLU.Shader('project',       this.shaderSources, null);
+    this.div_program          = new GLU.Shader('div',           this.shaderSources, null);
+    this.copy_program         = new GLU.Shader('copy',          this.shaderSources, null);
+    this.update_program       = new GLU.Shader('update',        this.shaderSources, null);
+    this.debris_program       = new GLU.Shader('debris',        this.shaderSources, null);
 }
 
-Solver.prototype.resize = function(Nr, Ny)
+Solver.prototype.resize = function(N)
 {
-    this.Nr = Nr;
-    this.Ny = Ny;
+    this.N = N;
     this.reset();
 }
 
@@ -67,7 +66,7 @@ Solver.prototype.getDomain = function()
 Solver.prototype.smoothSphere = function(x, c, R)
 {
 	// x = [r, y]
-	let rho= Math.sqrt(Math.pow(x[0]-c[0], 2.0) + Math.pow(x[1]-c[1], 2.0));
+	let rho = Math.sqrt(Math.pow(x[0]-c[0], 2.0) + Math.pow(x[1]-c[1], 2.0) + Math.pow(x[2]-c[2], 2.0));
 	let t = rho/R;
 	if (t<=1.0) return Math.max(0.0, 1.0 - t*t*(3.0 - 2.0*t));
 	return 0.0;
@@ -76,85 +75,124 @@ Solver.prototype.smoothSphere = function(x, c, R)
 Solver.prototype.radialFlow = function(x, c, R, V)
 {
     // x = [r, y]
-	let rho = Math.sqrt(Math.pow(x[0]-c[0], 2.0) + Math.pow(x[1]-c[1], 2.0));
+	let rho = Math.sqrt(Math.pow(x[0]-c[0], 2.0) + Math.pow(x[1]-c[1], 2.0) + Math.pow(x[2]-c[2], 2.0));
 	let t = rho/R;
     let v = (t<=1.0) ? V * Math.max(0.0, 1.0 - t*t*(3.0 - 2.0*t)) : 0.0;
-    let vr = v * (x[0]-c[0])/rho
+    let vx = v * (x[0]-c[0])/rho
     let vy = v * (x[1]-c[1])/rho
-    return [vr, vy]
+    let vz = v * (x[2]-c[2])/rho
+    return [vx, vy, vz];
+}
+
+Solver.prototype.mapVsToFrag = function(vsP, N)
+{
+    let i = vsP[0];
+    let j = vsP[1];
+    let k = vsP[2];
+    let ui = N*j + i;
+    let vi = k;
+    return [ui, vi];
+}
+
+Solver.prototype.mapFragtoBufferIndex = function(frag, N, numChannels)
+{
+    let iu = frag[0];
+    let iv = frag[1];
+    let width = N*N;
+    let index = iv*width + iu;
+    return numChannels*index;
 }
 
 Solver.prototype.initialize = function()
 {
-	let Nr = this.Nr;
-	let Ny = this.Ny;
+    let N = this.N;
 
-	let Qair0    = new Float32Array(Nr*Ny*4); // air
-	let Qdebris0 = new Float32Array(Nr*Ny*4); // particulate matter
-    let div0     = new Float32Array(Nr*Ny*4); // divergence
+    let Vair0    = new Float32Array(N*N * N * 4);  // air velocity field
+    let divVair0 = new Float32Array(N*N * N * 4);  // air velocity divergence field
+    let Pair0    = new Float32Array(N*N * N * 4);  // air pressure field
+    let Tair0    = new Float32Array(N*N * N * 4);  // air temperature field
+    let debris0  = new Float32Array(N*N * N * 4);  // debris extinction field
 
-	let R = Nr;  // full domain radius in voxels
-	let H = Ny;  // full domain height in voxels
+    let L = 100.0; // domain size in world units
+    this.dL = L/N;
+    let dL = this.dL;  // voxel size in world units
 
     noise.seed(Math.random());
 
-    for (let iy=0; iy<Ny; ++iy)
+    let blast_center = [0.5*L, L*this.blastHeight, 0.5*L];
+
+    this.Tambient = this.T0 + 1.0/this.buoyancy; // ambient temp which balances buoyancy and gravity
+
+    for (let iy=0; iy<N; ++iy)
     {
-        // ground height (domain bottom) is y = 0.0
-        let y = (0.5 + iy);
-        for (var ir=0; ir<Nr; ++ir)
-        {
-            let r = (0.5 + ir);
+        for (var iz=0; iz<N; ++iz)
+         {
+            for (var ix=0; ix<N; ++ix)
+            {
+                let x = (0.5 + ix)*dL;
+                let y = (0.5 + iy)*dL;
+                let z = (0.5 + iz)*dL;
+                let wsP = [x,y,z];      // world space location of voxel center
+                let vsP = [ix, iy, iz]  // voxel space location of lower-left corner (== voxel index)
 
-            // initial temperature profile
-            let T = this.T0 * (1.0 + this.blastTemperature*this.smoothSphere([r, y], [0.0, this.blastHeight*H], 2.0*this.blastRadius*R));
+                let r = Math.sqrt(Math.pow(x-blast_center[0], 2.0) + Math.pow(y-blast_center[1], 2.0)+ Math.pow(z-blast_center[2], 2.0));
 
-            // Initialize thermal medium:
-            let index = iy*Nr + ir;
+                // initialize temperature profile
+                let T = this.Tambient * (1.0 + this.blastTemperature*this.smoothSphere(wsP, blast_center, this.blastRadius*L));
 
-            // Initialize velocity to a spherical blast with a finite region:
-            V = this.radialFlow([r, y], [0.0, this.blastHeight*H], 2.0*this.blastRadius*R, this.blastVelocity);
-            let vr = V[0]
-            let vy = V[1]
+                // initialize velocity to a spherical blast with a finite region:
+                V = this.radialFlow(wsP, blast_center, this.blastRadius*L, this.blastVelocity);
 
-            Qair0[4*index+0] = vr; // vr, air
-            Qair0[4*index+1] = vy; // vy, air
-            Qair0[4*index+2] = T;  // T air
-            Qair0[4*index+3] = 0.0;
+                let frag = this.mapVsToFrag(vsP, N);
+                let b = this.mapFragtoBufferIndex(frag, N, 4);
 
-            div0[4*index+0] = 0.0;
-            div0[4*index+1] = 0.0;
-            div0[4*index+2] = 0.0;
-            div0[4*index+3] = 0.0;
+                // Initialize air variables
+                Vair0[b+0]  = V[0];
+                Vair0[b+1]  = V[1];
+                Vair0[b+2]  = V[2];
+                divVair0[b] = 0.0;
+                Pair0[b]    = 0.0;
+                Tair0[b]    = T;
 
-            // Initialize debris
-            Qdebris0[4*index+0] = y < this.debrisHeight*H ? Math.exp(-10.0*this.debrisFalloff*y/(this.debrisHeight*H)) : 0.0;
-            Qdebris0[4*index+1] = 0.6 * (1.0 + 0.1*noise.simplex3(32.0*y/H, 32.0*r/R, 0.0));
-            Qdebris0[4*index+2] = 0.7 * (1.0 + 0.1*noise.simplex3(32.0*y/H, 32.0*r/R, 1.0));
-            Qdebris0[4*index+3] = 0.8 * (1.0 + 0.1*noise.simplex3(32.0*y/H, 32.0*r/R, 2.0));
+                // Initialize debris density field
+                let density = y < this.debrisHeight*L ? Math.exp(-3.0*this.debrisFalloff*y/(this.debrisHeight*L)) : 0.0;
+                debris0[b+0] = density;
+                debris0[b+1] = density;
+                debris0[b+2] = density;
+            }
         }
     }
 
-	this.Qair = [ new GLU.Texture(Nr, Ny, 4, true, true, true, Qair0),  
-                  new GLU.Texture(Nr, Ny, 4, true, true, true, Qair0),
-                  new GLU.Texture(Nr, Ny, 4, true, true, true, Qair0) ];
+    // Initial velocity texture
+    this.Vair = [ new GLU.Texture(N*N, N, 4, true, true, true, Vair0),
+                  new GLU.Texture(N*N, N, 4, true, true, true, Vair0) ];
 
-    this.divv = new GLU.Texture(Nr, Ny, 4, true, true, true, div0);
+    // Initial velocity divergence texture
+    this.divVair = new GLU.Texture(N*N, N, 4, true, true, true, divVair0);
 
-	this.Qdebris = [ new GLU.Texture(Nr, Ny, 4, true, true, true, Qdebris0), 
-                     new GLU.Texture(Nr, Ny, 4, true, true, true, Qdebris0) ];
+    // Initial pressure texture
+    this.Pair = [ new GLU.Texture(N*N, N, 4, true, true, true, Pair0),
+                  new GLU.Texture(N*N, N, 4, true, true, true, Pair0) ];
 
-	this.frame = 0;
+    // Initial temperature texture
+    this.Tair = [ new GLU.Texture(N*N, N, 4, true, true, true, Tair0),
+                  new GLU.Texture(N*N, N, 4, true, true, true, Tair0) ];
 
-	this.domain = { boundsMin: [-R, 0.0, -R],
-	                boundsMax: [ R,  H,   R],
-	                center:    [0.0, H/2.0, 0.0],
-	                radius: R,
-	                height: H,
-	                Nr: Nr,
-	                Ny: Ny,
-                    T0: this.T0 }
-}
+    // Initial debris texture
+    this.debris = [ new GLU.Texture(N*N, N, 4, true, true, true, debris0),
+                    new GLU.Texture(N*N, N, 4, true, true, true, debris0) ];
+
+    this.frame = 0;
+
+    this.domain = { N: N,
+                    L: this.L,
+                    dL: this.dL,
+                    boundsMin: [0.0, 0.0, 0.0 ],
+                    boundsMax: [L, L, L],
+                    center:    [L/2.0, L/2.0, L/2.0],
+                    T0: this.T0
+                  };
+    }
 
 
 Solver.prototype.createQuadVbo = function()
@@ -174,17 +212,23 @@ Solver.prototype.createQuadVbo = function()
     return vbo;
 }
 
-// air simulation
-Solver.prototype.getQair = function()
+// air velocity texture
+Solver.prototype.getVair = function()
 {
-	return this.Qair[0];
-}	
+	return this.Vair[0];
+}
 
-// particulate matter simulation
-Solver.prototype.getQdebris = function()
+// air temperature texture
+Solver.prototype.getTair = function()
 {
-	return this.Qdebris[0];
-}	
+	return this.Tair[0];
+}
+
+// debris density texture
+Solver.prototype.getDebris = function()
+{
+	return this.debris[0];
+}
 
 Solver.prototype.step = function()
 {
@@ -192,132 +236,177 @@ Solver.prototype.step = function()
 
     let gl = GLU.gl;
 
-    gl.viewport(0, 0, this.Nr, this.Ny);
+    let N = this.N;
+    gl.viewport(0, 0, N*N, N);
     this.quadVbo.bind();
 
     // Run air force/advection step, writing 0 -> 1
     {
-        this.advect.bind();
-        this.advect.uniformI("Nr",            this.Nr);
-        this.advect.uniformI("Ny",            this.Ny);
-        this.advect.uniformF("volRadius",     this.domain.radius);
-        this.advect.uniformF("volHeight",     this.domain.height);
-        this.advect.uniformF("buoyancy",      this.buoyancy);
-        this.advect.uniformF("dustWeight",    this.dustWeight);
-        this.advect.uniformF("radiationLoss", this.radiationLoss * 1.0e-2);
-        this.advect.uniformF("T0",            this.T0);
-        this.advect.uniformF("timestep",      this.timestep);
-        
+        this.advect_program.bind();
+        this.advect_program.uniformI("N",             this.domain.N);
+        this.advect_program.uniformF("dL",            this.domain.dL);
+        this.advect_program.uniformF("timestep",      this.timestep);
+        this.advect_program.uniformF("buoyancy",      this.buoyancy);
+        this.advect_program.uniformF("gravity",      this.gravity);
+        this.advect_program.uniformF("radiationLoss", this.radiationLoss * 1.0e-2);
+        this.advect_program.uniformF("Tambient",      this.Tambient);
+
+        this.fbo.bind();
+        this.fbo.drawBuffers(3);
+        this.fbo.attachTexture(this.Vair[1], 0); // write to  Vair[1]
+        this.fbo.attachTexture(this.Pair[1], 1); // write to  Pair[1]
+        this.fbo.attachTexture(this.Tair[1], 2); // write to  Tair[1]
+        this.Vair[0].bind(0);                    // read from Vair[0]
+        this.Pair[0].bind(1);                    // read from Pair[0]
+        this.Tair[0].bind(2);                    // read from Tair[0]
+        this.advect_program.uniformTexture("Vair_sampler", this.Vair[0]);
+        this.advect_program.uniformTexture("Pair_sampler", this.Pair[0]);
+        this.advect_program.uniformTexture("Tair_sampler", this.Tair[0]);
+        this.quadVbo.draw(this.advect_program, gl.TRIANGLE_FAN);
+        this.fbo.detachTexture(0);
+        this.fbo.detachTexture(1);
+        this.fbo.detachTexture(2);
+        this.fbo.unbind();
+
+        // copy temperature 1 -> 0
+        this.copy_program.bind();
         this.fbo.bind();
         this.fbo.drawBuffers(1);
-        this.fbo.attachTexture(this.Qair[1], 0); // write to  Qair[1]
-        this.Qair[0].bind(0);                    // read from Qair[0]
-        this.advect.uniformTexture("Qin", this.Qair[0]);
-
-        this.Qdebris[0].bind(1);                 // read from Qdebris[0]
-        this.advect.uniformTexture("Qdust", this.Qdebris[0]); 
-
-        this.quadVbo.draw(this.advect, gl.TRIANGLE_FAN);
+        this.fbo.attachTexture(this.Tair[0], 0); // write to  Tair[0]
+        this.Tair[1].bind(0);                    // read from Tair[1]
+        this.copy_program.uniformTexture("Qin", this.Tair[1]);
+        this.quadVbo.draw(this.copy_program, gl.TRIANGLE_FAN);
+        this.fbo.detachTexture(0);
         this.fbo.unbind();
+
     }
+
+    gl.bindTexture(gl.TEXTURE_2D, null);
 
     // Compute velocity divergence
     {
-        this.div.bind();
-        this.div.uniformI("Nr",       this.Nr);
-        this.div.uniformI("Ny",       this.Ny);
+        this.div_program.bind();
+        this.div_program.uniformI("N",             this.domain.N);
+        this.div_program.uniformF("dL",            this.domain.dL);
         this.fbo.bind();
         this.fbo.drawBuffers(1);
-        this.fbo.attachTexture(this.divv, 0); // write to this.divv
-        this.Qair[1].bind(0);                 // read from Qair[1]
-        this.div.uniformTexture("Qin", this.Qair[1]);
-        this.quadVbo.draw(this.div, gl.TRIANGLE_FAN);
+        this.fbo.attachTexture(this.divVair, 0); // write to divVair
+        this.Vair[1].bind(0);                    // read from Vair[1]
+        this.div_program.uniformTexture("Vair_sampler", this.Vair[1]);
+        this.quadVbo.draw(this.div_program, gl.TRIANGLE_FAN);
+        this.fbo.detachTexture(0);
         this.fbo.unbind();
     }
 
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
     // Run air pressure projection step
     {
-        this.project.bind();
-        this.project.uniformI("Nr",       this.Nr);
-        this.project.uniformI("Ny",       this.Ny);
-        this.project.uniformF("volRadius", this.domain.radius);
-        this.project.uniformF("volHeight", this.domain.height);
-        this.project.uniformF("expansion", this.expansion);
-        this.project.uniformF("timestep", this.timestep);
-        
+        this.project_program.bind();
+        this.project_program.uniformI("N",             this.domain.N);
+        this.project_program.uniformF("dL",            this.domain.dL);
+        this.project_program.uniformF("timestep", this.timestep);
+        this.project_program.uniformF("expansion", this.expansion);
+
         // Update pressure field by Jacobi iteration
         // (using last frame pressure as a warm-start)
         // Sequence:
         //   1  ->  0  (read black from 1, write red   to 0)
         //   0  ->  1  (read red   from 0, write black to 1)
-        const numIterations = 16;
+        const numIterations = 8;
         for (let n=0; n<numIterations; ++n)
         {
             this.fbo.bind();
-            this.fbo.attachTexture(this.Qair[0], 0);          // write to 0
-            this.Qair[1].bind(0);                             // read from 1
-            this.project.uniformTexture("Qin", this.Qair[1]);
-            this.divv.bind(1);                               // read divv
-            this.project.uniformTexture("div", this.divv);
-            this.quadVbo.draw(this.project, gl.TRIANGLE_FAN);
+            this.fbo.drawBuffers(1);
+            this.fbo.attachTexture(this.Pair[0], 0);          // write to Pair[0]
+            this.Pair[1].bind(0);                             // read from Pair[1]
+            this.Tair[0].bind(1);                             // read from Tair[0]
+            this.divVair.bind(2);                             // read divVair
+            this.project_program.uniformTexture("Pair_sampler", this.Pair[1]);
+            this.project_program.uniformTexture("Tair_sampler", this.Tair[0]);
+            this.project_program.uniformTexture("divVair_sampler", this.divVair);
+            this.quadVbo.draw(this.project_program, gl.TRIANGLE_FAN);
+            this.fbo.detachTexture(0);
             this.fbo.unbind();
 
+            gl.bindTexture(gl.TEXTURE_2D, null);
+
             this.fbo.bind();
-            this.fbo.attachTexture(this.Qair[1], 0);          // write to 1
-            this.Qair[0].bind(0);                             // read from 0
-            this.project.uniformTexture("Qin", this.Qair[0]);
-            this.divv.bind(1);                                // read divv
-            this.project.uniformTexture("div", this.divv);
-            this.quadVbo.draw(this.project, gl.TRIANGLE_FAN);
+            this.fbo.drawBuffers(1);
+            this.fbo.attachTexture(this.Pair[1], 0);          // write to Pair[1]
+            this.Pair[0].bind(0);                             // read from Pair[0]
+            this.Tair[0].bind(1);                             // read from Tair[0]
+            this.divVair.bind(2);                             // read divVair
+            this.project_program.uniformTexture("Pair_sampler", this.Pair[0]);
+            this.project_program.uniformTexture("Tair_sampler", this.Tair[0]);
+            this.project_program.uniformTexture("divVair_sampler", this.divVair);
+            this.quadVbo.draw(this.project_program, gl.TRIANGLE_FAN);
+            this.fbo.detachTexture(0);
             this.fbo.unbind();
+
+            gl.bindTexture(gl.TEXTURE_2D, null);
         }
     }
 
     // Update air velocity from 1 -> 0
     {
-        this.update.bind();
-        this.update.uniformI("Nr",       this.Nr);
-        this.update.uniformI("Ny",       this.Ny);
-        this.update.uniformF("volRadius", this.domain.radius);
-        this.update.uniformF("volHeight", this.domain.height);
+        this.update_program.bind();
+        this.update_program.uniformI("N",             this.domain.N);
+        this.update_program.uniformF("dL",            this.domain.dL);
+        this.update_program.uniformF("timestep", this.timestep);
+
         this.fbo.bind();
-        this.fbo.attachTexture(this.Qair[0], 0);         // write to  Qair[0]
-        this.Qair[1].bind(0);                            // read from Qair[1]
-        this.update.uniformTexture("Qin", this.Qair[1]);
-        this.quadVbo.draw(this.update, gl.TRIANGLE_FAN);
+        this.fbo.drawBuffers(1);
+        this.fbo.attachTexture(this.Vair[0], 0);          // write to  Vair[0]
+        this.Vair[1].bind(0);                             // read from Vair[1]
+        this.Pair[1].bind(1);                             // read from Pair[1]
+        this.update_program.uniformTexture("Vair_sampler", this.Vair[1]);
+        this.update_program.uniformTexture("Pair_sampler", this.Pair[1]);
+        this.quadVbo.draw(this.update_program, gl.TRIANGLE_FAN);
+        this.fbo.detachTexture(0);
         this.fbo.unbind();
     }
+
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    this.fbo.detachTexture(0);
+    this.fbo.unbind();
 
     // Advect debris in air flow
     {
         // write debris 0 -> 1
-        this.debris.bind();
-        this.debris.uniformI("Nr",       this.Nr);
-        this.debris.uniformI("Ny",       this.Ny);
-        this.debris.uniformF("timestep",      this.timestep);
-        this.debris.uniformF("volRadius", this.domain.radius);
-        this.debris.uniformF("volHeight", this.domain.height);
+        this.debris_program.bind();
+        this.debris_program.uniformI("N",             this.domain.N);
+        this.debris_program.uniformF("dL",            this.domain.dL);
+        this.debris_program.uniformF("timestep", this.timestep);
         this.fbo.bind();
         this.fbo.drawBuffers(1);
-        this.fbo.attachTexture(this.Qdebris[1], 0); // write to  Qdebris[1]
-        this.Qdebris[0].bind(0);                    // read from Qdebris[0]
-        this.Qair[1].bind(1);                       // read from Qair[1]
-        this.debris.uniformTexture("Qdebris", this.Qdebris[0]);
-        this.debris.uniformTexture("Qair", this.Qair[1]);
-        this.quadVbo.draw(this.debris, gl.TRIANGLE_FAN);
+        this.fbo.attachTexture(this.debris[1], 0); // write to  debris[1]
+        this.debris[0].bind(0);                    // read from debris[0]
+        this.Vair[1].bind(1);                      // read from Vair[1]
+        this.debris_program.uniformTexture("debris_sampler", this.debris[0]);
+        this.debris_program.uniformTexture("Vair_sampler",   this.Vair[1]);
+        this.quadVbo.draw(this.debris_program, gl.TRIANGLE_FAN);
+        this.fbo.detachTexture(0);
         this.fbo.unbind();
 
+        gl.bindTexture(gl.TEXTURE_2D, null);
+
         // copy debris 1 -> 0
-        this.copy.bind();
+        this.copy_program.bind();
         this.fbo.bind();
         this.fbo.drawBuffers(1);
-        this.fbo.attachTexture(this.Qdebris[0], 0); // write to  Qdebris[0]
-        this.Qdebris[1].bind(0);                    // read from Qdebris[1]
-        this.copy.uniformTexture("Qin",   this.Qdebris[1]);
-        this.quadVbo.draw(this.copy, gl.TRIANGLE_FAN);
+        this.fbo.attachTexture(this.debris[0], 0); // write to  debris[0]
+        this.debris[1].bind(0);                    // read from debris[1]
+        this.copy_program.uniformTexture("Qin", this.debris[1]);
+        this.quadVbo.draw(this.copy_program, gl.TRIANGLE_FAN);
+        this.fbo.detachTexture(0);
         this.fbo.unbind();
     }
 
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
+    /*
+    this.fbo.bind();
     let status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
     switch (status)
     {
@@ -329,12 +418,10 @@ Solver.prototype.step = function()
     	case gl.RENDERBUFFER_SAMPLES:                      console.log("RENDERBUFFER_SAMPLES");                      break;
     	default: break;
     }
- 
+
 	this.fbo.unbind();
     gl.bindTexture(gl.TEXTURE_2D, null);
-
-    // @todo: advect (and inject) particulate matter passively in the flow, 
-    //        to model dust (and fission products)
+    */
 
     this.frame++;
 }
