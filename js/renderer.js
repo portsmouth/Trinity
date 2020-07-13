@@ -6,13 +6,12 @@ var Renderer = function()
 	let gl = GLU.gl;
 
     // Default user-adjustable properties
-    this.exposure = -2.0;
+    this.exposure = -1.0;
     this.gamma = 2.2;
     this.colorA = [1.0,0.8,0.5];
     this.colorB = [1.0,0.8,0.5];
-    this.blackbodyEmission = -1.0;
-    this.debrisExtinction = 10.0;
-    this.tempMultiplier = 1.0;
+    this.blackbodyEmission = -10.0;
+    this.debrisExtinction = 0.8;
     this.TtoKelvin = 4.0;
 
     // Internal buffers and programs
@@ -21,7 +20,6 @@ var Renderer = function()
     this.fbo = new GLU.RenderTarget();
 
     this.volumeProgram    = null;
-    this.sliceProgram     = null;
     this.lineProgram      = null;
     this.tonemapProgram   = null;
 
@@ -146,7 +144,6 @@ Renderer.prototype.render = function(solver)
 
     gl.disable(gl.DEPTH_TEST);
     gl.viewport(0.0, 0.0, this._width, this._height);
-
 	gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
@@ -168,14 +165,13 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.bind();
 
         debris.bind(0);
-        this.volumeProgram.uniformTexture("debris_sampler", debris);
-
         Tair.bind(1);
-        this.volumeProgram.uniformTexture("Tair_sampler", Tair);
-
         Vair.bind(2);
+        this.volumeProgram.uniformTexture("debris_sampler", debris);
+        this.volumeProgram.uniformTexture("Tair_sampler", Tair);
         this.volumeProgram.uniformTexture("Vair_sampler", Vair);
 
+        // Camera
         this.volumeProgram.uniform2Fv("resolution", [this._width, this._height]);
         this.volumeProgram.uniform3Fv("camPos", [camPos.x, camPos.y, camPos.z]);
         this.volumeProgram.uniform3Fv("camDir", [camDir.x, camDir.y, camDir.z]);
@@ -185,12 +181,19 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniformF("camAspect", camera.aspect);
         this.volumeProgram.uniform3Fv("volMin", domain.boundsMin);
         this.volumeProgram.uniform3Fv("volMax", domain.boundsMax);
-        this.volumeProgram.uniform3Fv("volCenter", domain.center);
+        this.volumeProgram.uniform3Fv("volCenter", domain.boundsCenter);
 
-        this.volumeProgram.uniformI("N", domain.N);
-        this.volumeProgram.uniformF("dL", domain.dL);
+        // Geometry
+        this.volumeProgram.uniformI("Nx",             domain.Nx);
+        this.volumeProgram.uniformI("Ny",             domain.Ny);
+        this.volumeProgram.uniformI("Nz",             domain.Nz);
+        this.volumeProgram.uniformI("Ncol",           domain.Ncol);
+        this.volumeProgram.uniformI("W",              domain.W);
+        this.volumeProgram.uniformI("H",              domain.H);
+        this.volumeProgram.uniformF("dL",             domain.dL);
         this.volumeProgram.uniformI("Nraymarch", 256);
 
+        // Physics
         this.volumeProgram.uniformF("debrisExtinction", this.debrisExtinction);
         this.volumeProgram.uniformF("blackbodyEmission", Math.pow(2.0, this.blackbodyEmission));
         this.volumeProgram.uniformF("TtoKelvin", this.TtoKelvin);
@@ -210,7 +213,7 @@ Renderer.prototype.render = function(solver)
         var projectionMatrixLocation = this.lineProgram.getUniformLocation("u_projectionMatrix");
         gl.uniformMatrix4fv(projectionMatrixLocation, false, projectionMatrix);
 
-        this.lineProgram.uniform3Fv("color", [1.0, 0.0, 0.0]);
+        this.lineProgram.uniform3Fv("color", [0.5, 0.0, 0.0]);
 
         // Setup modelview matrix (to match camera)
         camera.updateMatrixWorld();

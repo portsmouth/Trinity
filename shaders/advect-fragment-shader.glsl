@@ -1,14 +1,22 @@
 precision highp float;
 
-uniform int N;
+// Geometry
+uniform int Nx;
+uniform int Ny;
+uniform int Nz;
+uniform int Ncol;
+uniform int W;
+uniform int H;
+uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
 uniform float dL;
-uniform float timestep;
 
+// Physics
+uniform float timestep;
 uniform float buoyancy;
 uniform float gravity;
 uniform float radiationLoss;
-uniform float T0;       // reference temperature for buoyancy
-uniform float Tambient; // temperature which generates buoyancy which balances gravity
+uniform float T0;             // reference temperature for buoyancy
+uniform float Tambient;       // temperature which generates buoyancy which balances gravity
 
 in vec2 v_texcoord;
 
@@ -25,30 +33,52 @@ layout(location = 2) out vec4 Tair_output;
 
 vec3 mapFragToVs(in ivec2 frag)
 {
-    // map fragment coord in [N*N, N] to continuous position of corresponding voxel center in voxel space
+    // map fragment coord in [W, H] to continuous position of corresponding voxel center in voxel space
     int iu = frag.x;
     int iv = frag.y;
-    int k = iv;
-    int j = int(floor(float(iu)/float(N)));
-    int i = iu - N*j;
+    int row = int(floor(float(iv)/float(Nz)));
+    int col = int(floor(float(iu)/float(Nx)));
+    int i = iu - col*Nx;
+    int j = col + row*Ncol;
+    int k = iv - row*Nz;
     return vec3(ivec3(i, j, k)) + vec3(0.5);
+}
+
+vec2 slicetoUV(int j, vec3 vsP)
+{
+    // Given y-slice index j, and continuous voxel space xz-location,
+    // return corresponding continuous frag UV for interpolation within this slice
+    int row = int(floor(float(j)/float(Ncol)));
+    int col = j - row*Ncol;
+    vec2 uv_ll = vec2(float(col*Nx)/float(W), float(row*Nz)/float(H));
+    float du = vsP.x/float(W);
+    float dv = vsP.z/float(H);
+    return uv_ll + vec2(du, dv);
 }
 
 vec4 interp(in sampler2D S, in vec3 wsP)
 {
     vec3 vsP = wsP / dL;
     float pY = vsP.y - 0.5;
-    int jlo = clamp(int(floor(pY)), 0, N-1); // lower j-slice
-    int jhi = clamp(         jlo+1, 0, N-1); // upper j-slice
-    float flo = float(jhi) - pY;             // lower j fraction
-    float fhi = 1.0 - flo;                   // upper j fraction
-    vec2 resolution = vec2(float(N*N), float(N)); // @todo: precompute
-    float v = vsP.z / resolution.y;
-    float ulo = (vsP.x + float(jlo)*float(N)) / resolution.x;
-    float uhi = (vsP.x + float(jhi)*float(N)) / resolution.x;
-    vec4 Slo = texture(S, vec2(ulo, v));
-    vec4 Shi = texture(S, vec2(uhi, v));
+    int jlo = clamp(int(floor(pY)), 0, Ny-1); // lower j-slice
+    int jhi = clamp(         jlo+1, 0, Ny-1); // upper j-slice
+    float flo = float(jhi) - pY;              // lower j fraction
+    float fhi = 1.0 - flo;                    // upper j fraction
+    vec2 uv_lo = slicetoUV(jlo, vsP);
+    vec2 uv_hi = slicetoUV(jhi, vsP);
+    vec4 Slo = texture(S, uv_lo);
+    vec4 Shi = texture(S, uv_hi);
     return flo*Slo + fhi*Shi;
+}
+
+vec3 back_advect(vec3 wsX, vec3 vX, float h)
+{
+    // RK4 integration for position wsX advected backwards through time h:
+    vec3 k1 = vX;
+    vec3 k2 = interp(Vair_sampler, wsX - 0.5*h*k1).xyz;
+    vec3 k3 = interp(Vair_sampler, wsX - 0.5*h*k2).xyz;
+    vec3 k4 = interp(Vair_sampler, wsX -     h*k3).xyz;
+    return clamp(wsX - h*(k1 + 2.0*k2 + 2.0*k3 + k4)/6.0, vec3(dL), L-vec3(dL));
 }
 
 void main()
@@ -60,13 +90,14 @@ void main()
 
     // Apply semi-Lagrangian advection
     vec3 v0  = texelFetch(Vair_sampler, frag, 0).xyz;
-    vec3 wsXp = wsX - v0*timestep; // @todo: implement RK4
-    vec3  v = interp(Vair_sampler, wsXp).xyz;
+    vec3 wsXp = back_advect(wsX, v0, timestep); // @todo: clamp to stay in grid bounds
+    vec3  v = interp(Vair_sampler, wsXp).rgb;
     float P = interp(Pair_sampler, wsXp).x;
     float T = interp(Tair_sampler, wsXp).x;
 
     // Apply thermal relaxation to ambient temperature due to "radiation loss"
-    T *= exp(-radiationLoss);
+    float dT = T - Tambient;
+    T = Tambient + dT*exp(-radiationLoss);
 
     // Apply gravity + buoyancy force
     float buoyancy_expansion = buoyancy*(T - T0);
@@ -74,7 +105,7 @@ void main()
 
     // Apply solid boundary condition at y=0
     ivec3 vsI = ivec3(vsX);
-    if (vsI.y==0) v.y = abs(v.y);
+    if (vsI.y==0) v.y = 0.0;
 
     Vair_output = vec4(v, 0.0);
     Pair_output = vec4(P);

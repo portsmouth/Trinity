@@ -19,21 +19,22 @@ var Solver = function()
     this.compileShaders();
 
     // Defaults
-    this.timestep = 0.3;
-    this.blastHeight = 0.1;
+    this.timestep = 1.0;
+    this.NprojSteps = 32;
+    this.blastHeight = 0.2;
     this.blastRadius = 0.05;
-    this.blastTemperature = 100.0;  // initial temperature of fireball relative to ambient
-    this.blastVelocity = 50.0;    // outward blast speed in voxels/timestep
-    this.debrisHeight = 0.2;       // maximum height of dust layer, as a fraction of domain height
+    this.blastTemperature = 500.0;   // initial temperature of fireball relative to ambient
+    this.blastVelocity = 0.0;      // outward blast speed in voxels/timestep
+    this.debrisHeight = 0.02;        // maximum height of dust layer, as a fraction of domain height
     this.debrisFalloff = 0.01;      // fall-off exponent within dust layer
-    this.T0 = 1.0;                 // nominal reference temperature for buoyancy
-    this.buoyancy = 0.003;         // initial buoyancy (thermal expansion coeff. of air)
-    this.expansion = 0.001;
-    this.gravity = -1.0;
-    this.radiationLoss = 0.01;    // radiation loss rate (per timestep fractional absorption)
+    this.T0 = 1.0;                  // nominal reference temperature for buoyancy
+    this.buoyancy = 0.004;          // initial buoyancy (thermal expansion coeff. of air)
+    this.expansion = 0.0;
+    this.gravity = -0.5;
+    this.radiationLoss = 0.0;    // radiation loss rate (per timestep fractional absorption)
 
     // Initialize solver
-    this.resize(128);
+    this.resize(128, 512, 128);
 }
 
 Solver.prototype.compileShaders = function()
@@ -46,9 +47,12 @@ Solver.prototype.compileShaders = function()
     this.debris_program       = new GLU.Shader('debris',        this.shaderSources, null);
 }
 
-Solver.prototype.resize = function(N)
+Solver.prototype.resize = function(Nx, Ny, Nz)
 {
-    this.N = N;
+    this.Nx = Nx;
+    this.Ny = Ny;
+    this.Nz = Nz;
+
     this.reset();
 }
 
@@ -84,67 +88,82 @@ Solver.prototype.radialFlow = function(x, c, R, V)
     return [vx, vy, vz];
 }
 
-Solver.prototype.mapVsToFrag = function(vsP, N)
+Solver.prototype.mapVsToFrag = function(vsP, Ncol, Nx, Ny, Nz)
 {
     let i = vsP[0];
     let j = vsP[1];
     let k = vsP[2];
-    let ui = N*j + i;
-    let vi = k;
-    return [ui, vi];
+    let row = Math.floor(j/Ncol);
+    let col = j - row*Ncol;
+    let iu = col*Nx + i;
+    let iv = row*Nz + k;
+    return [iu, iv];
 }
 
-Solver.prototype.mapFragtoBufferIndex = function(frag, N, numChannels)
+Solver.prototype.mapFragtoBufferIndex = function(frag, W, numChannels)
 {
     let iu = frag[0];
     let iv = frag[1];
-    let width = N*N;
-    let index = iv*width + iu;
+    let index = iv*W + iu;
     return numChannels*index;
 }
 
 Solver.prototype.initialize = function()
 {
-    let N = this.N;
+    let Nx = this.Nx;
+    let Ny = this.Ny;
+    let Nz = this.Nz;
 
-    let Vair0    = new Float32Array(N*N * N * 4);  // air velocity field
-    let divVair0 = new Float32Array(N*N * N * 4);  // air velocity divergence field
-    let Pair0    = new Float32Array(N*N * N * 4);  // air pressure field
-    let Tair0    = new Float32Array(N*N * N * 4);  // air temperature field
-    let debris0  = new Float32Array(N*N * N * 4);  // debris extinction field
+    let W = 16384; // maximum texture width available in WebGL2
+    let Ncol = Math.floor(W/Nx);
+    if (Ncol<1)
+        GLU.fail("Resolution too high: Nx=", Nx);
+    let Nrow = Math.ceil(Ny/Ncol);
+    let H = Nrow*Nz;
+    if (H > W)
+        GLU.fail("Resolution too high: Ny=", Ny);
+    this.W = W;
+    this.H = H;
 
-    let L = 100.0; // domain size in world units
-    this.dL = L/N;
-    let dL = this.dL;  // voxel size in world units
+    let Vair0    = new Float32Array(W*H*4);  // air velocity field
+    let divVair0 = new Float32Array(W*H*4);  // air velocity divergence field
+    let Pair0    = new Float32Array(W*H*4);  // air pressure field
+    let Tair0    = new Float32Array(W*H*4);  // air temperature field
+    let debris0  = new Float32Array(W*H*4);  // debris extinction field
 
-    noise.seed(Math.random());
+    let dL = 1.0; // voxel size in world units
+    this.dL = dL;
 
-    let blast_center = [0.5*L, L*this.blastHeight, 0.5*L];
+    let L = [dL*Nx, dL*Ny, dL*Nz];
+    this.L = L;
+    let lengthScale = Math.min(L[0], L[1], L[2]);
+
+    let blast_center = [0.5*L[0], L[1]*this.blastHeight, 0.5*L[2]];
 
     this.Tambient = this.T0 + 1.0/this.buoyancy; // ambient temp which balances buoyancy and gravity
 
-    for (let iy=0; iy<N; ++iy)
+    for (let iy=0; iy<Ny; ++iy)
     {
-        for (var iz=0; iz<N; ++iz)
+        for (var iz=0; iz<Nz; ++iz)
          {
-            for (var ix=0; ix<N; ++ix)
+            for (var ix=0; ix<Nx; ++ix)
             {
                 let x = (0.5 + ix)*dL;
                 let y = (0.5 + iy)*dL;
                 let z = (0.5 + iz)*dL;
-                let wsP = [x,y,z];      // world space location of voxel center
+                let wsP = [x, y, z];      // world space location of voxel center
                 let vsP = [ix, iy, iz]  // voxel space location of lower-left corner (== voxel index)
 
                 let r = Math.sqrt(Math.pow(x-blast_center[0], 2.0) + Math.pow(y-blast_center[1], 2.0)+ Math.pow(z-blast_center[2], 2.0));
 
                 // initialize temperature profile
-                let T = this.Tambient * (1.0 + this.blastTemperature*this.smoothSphere(wsP, blast_center, this.blastRadius*L));
+                let T = this.Tambient * (1.0 + this.blastTemperature*this.smoothSphere(wsP, blast_center, this.blastRadius*lengthScale));
 
                 // initialize velocity to a spherical blast with a finite region:
-                V = this.radialFlow(wsP, blast_center, this.blastRadius*L, this.blastVelocity);
+                V = this.radialFlow(wsP, blast_center, this.blastRadius*lengthScale, this.blastVelocity);
 
-                let frag = this.mapVsToFrag(vsP, N);
-                let b = this.mapFragtoBufferIndex(frag, N, 4);
+                let frag = this.mapVsToFrag(vsP, Ncol, Nx, Ny, Nz);
+                let    b = this.mapFragtoBufferIndex(frag, W, 4);
 
                 // Initialize air variables
                 Vair0[b+0]  = V[0];
@@ -155,7 +174,7 @@ Solver.prototype.initialize = function()
                 Tair0[b]    = T;
 
                 // Initialize debris density field
-                let density = y < this.debrisHeight*L ? Math.exp(-3.0*this.debrisFalloff*y/(this.debrisHeight*L)) : 0.0;
+                let density = y < this.debrisHeight*L[1] ? Math.exp(-3.0*this.debrisFalloff*y/(this.debrisHeight*L[1])) : 0.0;
                 debris0[b+0] = density;
                 debris0[b+1] = density;
                 debris0[b+2] = density;
@@ -164,32 +183,38 @@ Solver.prototype.initialize = function()
     }
 
     // Initial velocity texture
-    this.Vair = [ new GLU.Texture(N*N, N, 4, true, true, true, Vair0),
-                  new GLU.Texture(N*N, N, 4, true, true, true, Vair0) ];
+    this.Vair = [ new GLU.Texture(W, H, 4, true, true, true, Vair0),
+                  new GLU.Texture(W, H, 4, true, true, true, Vair0) ];
 
     // Initial velocity divergence texture
-    this.divVair = new GLU.Texture(N*N, N, 4, true, true, true, divVair0);
+    this.divVair = new GLU.Texture(W, H, 4, true, true, true, divVair0);
 
     // Initial pressure texture
-    this.Pair = [ new GLU.Texture(N*N, N, 4, true, true, true, Pair0),
-                  new GLU.Texture(N*N, N, 4, true, true, true, Pair0) ];
+    this.Pair = [ new GLU.Texture(W, H, 4, true, true, true, Pair0),
+                  new GLU.Texture(W, H, 4, true, true, true, Pair0) ];
 
     // Initial temperature texture
-    this.Tair = [ new GLU.Texture(N*N, N, 4, true, true, true, Tair0),
-                  new GLU.Texture(N*N, N, 4, true, true, true, Tair0) ];
+    this.Tair = [ new GLU.Texture(W, H, 4, true, true, true, Tair0),
+                  new GLU.Texture(W, H, 4, true, true, true, Tair0) ];
 
     // Initial debris texture
-    this.debris = [ new GLU.Texture(N*N, N, 4, true, true, true, debris0),
-                    new GLU.Texture(N*N, N, 4, true, true, true, debris0) ];
+    this.debris = [ new GLU.Texture(W, H, 4, true, true, true, debris0),
+                    new GLU.Texture(W, H, 4, true, true, true, debris0) ];
 
     this.frame = 0;
 
-    this.domain = { N: N,
-                    L: this.L,
+    this.domain = { Nx: Nx,
+                    Ny: Ny,
+                    Nz: Nz,
+                    Ncol: Ncol,
+                    Nrow: Nrow,
                     dL: this.dL,
-                    boundsMin: [0.0, 0.0, 0.0 ],
-                    boundsMax: [L, L, L],
-                    center:    [L/2.0, L/2.0, L/2.0],
+                    L: this.L,
+                    W: this.W,
+                    H: this.H,
+                    boundsMin:    [0.0,       0.0,       0.0      ],
+                    boundsMax:    [dL*Nx,     dL*Ny,     dL*Nz    ],
+                    boundsCenter: [dL*Nx/2.0, dL*Ny/2.0, dL*Nz/2.0],
                     T0: this.T0
                   };
     }
@@ -198,7 +223,6 @@ Solver.prototype.initialize = function()
 Solver.prototype.createQuadVbo = function()
 {
 	let gl = GLU.gl;
-
     var vbo = new GLU.VertexBuffer();
     vbo.addAttribute("Position", 3, gl.FLOAT, false);
     vbo.addAttribute("TexCoord", 2, gl.FLOAT, false);
@@ -236,19 +260,25 @@ Solver.prototype.step = function()
 
     let gl = GLU.gl;
 
-    let N = this.N;
-    gl.viewport(0, 0, N*N, N);
+    gl.viewport(0, 0, this.W, this.H);
     this.quadVbo.bind();
 
     // Run air force/advection step, writing 0 -> 1
     {
         this.advect_program.bind();
-        this.advect_program.uniformI("N",             this.domain.N);
-        this.advect_program.uniformF("dL",            this.domain.dL);
+        this.advect_program.uniformI("Nx",             this.domain.Nx);
+        this.advect_program.uniformI("Ny",             this.domain.Ny);
+        this.advect_program.uniformI("Nz",             this.domain.Nz);
+        this.advect_program.uniformI("Ncol",           this.domain.Ncol);
+        this.advect_program.uniformI("W",              this.domain.W);
+        this.advect_program.uniformI("H",              this.domain.H);
+        this.advect_program.uniform3Fv("L",            this.domain.L);
+        this.advect_program.uniformF("dL",             this.domain.dL);
         this.advect_program.uniformF("timestep",      this.timestep);
         this.advect_program.uniformF("buoyancy",      this.buoyancy);
-        this.advect_program.uniformF("gravity",      this.gravity);
+        this.advect_program.uniformF("gravity",       this.gravity);
         this.advect_program.uniformF("radiationLoss", this.radiationLoss * 1.0e-2);
+        this.advect_program.uniformF("T0",            this.domain.T0);
         this.advect_program.uniformF("Tambient",      this.Tambient);
 
         this.fbo.bind();
@@ -286,8 +316,12 @@ Solver.prototype.step = function()
     // Compute velocity divergence
     {
         this.div_program.bind();
-        this.div_program.uniformI("N",             this.domain.N);
+        this.div_program.uniformI("Nx",            this.domain.Nx);
+        this.div_program.uniformI("Ny",            this.domain.Ny);
+        this.div_program.uniformI("Nz",            this.domain.Nz);
+        this.div_program.uniformI("Ncol",          this.domain.Ncol);
         this.div_program.uniformF("dL",            this.domain.dL);
+
         this.fbo.bind();
         this.fbo.drawBuffers(1);
         this.fbo.attachTexture(this.divVair, 0); // write to divVair
@@ -303,9 +337,12 @@ Solver.prototype.step = function()
     // Run air pressure projection step
     {
         this.project_program.bind();
-        this.project_program.uniformI("N",             this.domain.N);
+        this.project_program.uniformI("Nx",            this.domain.Nx);
+        this.project_program.uniformI("Ny",            this.domain.Ny);
+        this.project_program.uniformI("Nz",            this.domain.Nz);
+        this.project_program.uniformI("Ncol",          this.domain.Ncol);
         this.project_program.uniformF("dL",            this.domain.dL);
-        this.project_program.uniformF("timestep", this.timestep);
+        this.project_program.uniformF("timestep",  this.timestep);
         this.project_program.uniformF("expansion", this.expansion);
 
         // Update pressure field by Jacobi iteration
@@ -313,8 +350,7 @@ Solver.prototype.step = function()
         // Sequence:
         //   1  ->  0  (read black from 1, write red   to 0)
         //   0  ->  1  (read red   from 0, write black to 1)
-        const numIterations = 8;
-        for (let n=0; n<numIterations; ++n)
+        for (let n=0; n<Math.floor(this.NprojSteps); ++n)
         {
             this.fbo.bind();
             this.fbo.drawBuffers(1);
@@ -351,7 +387,10 @@ Solver.prototype.step = function()
     // Update air velocity from 1 -> 0
     {
         this.update_program.bind();
-        this.update_program.uniformI("N",             this.domain.N);
+        this.update_program.uniformI("Nx",            this.domain.Nx);
+        this.update_program.uniformI("Ny",            this.domain.Ny);
+        this.update_program.uniformI("Nz",            this.domain.Nz);
+        this.update_program.uniformI("Ncol",          this.domain.Ncol);
         this.update_program.uniformF("dL",            this.domain.dL);
         this.update_program.uniformF("timestep", this.timestep);
 
@@ -375,7 +414,13 @@ Solver.prototype.step = function()
     {
         // write debris 0 -> 1
         this.debris_program.bind();
-        this.debris_program.uniformI("N",             this.domain.N);
+        this.debris_program.uniformI("Nx",            this.domain.Nx);
+        this.debris_program.uniformI("Ny",            this.domain.Ny);
+        this.debris_program.uniformI("Nz",            this.domain.Nz);
+        this.debris_program.uniformI("Ncol",          this.domain.Ncol);
+        this.debris_program.uniformI("W",             this.domain.W);
+        this.debris_program.uniformI("H",             this.domain.H);
+        this.debris_program.uniform3Fv("L",           this.domain.L);
         this.debris_program.uniformF("dL",            this.domain.dL);
         this.debris_program.uniformF("timestep", this.timestep);
         this.fbo.bind();

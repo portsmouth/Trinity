@@ -58,12 +58,9 @@ GUI.prototype.createRendererSettings = function()
 
 	this.rendererFolder.add(renderer, 'exposure', -10.0, 10.0);
 	this.rendererFolder.add(renderer, 'gamma', 1.0, 3.0);
-
-    this.rendererFolder.add(renderer, 'debrisExtinction', 0.0, 200.0);
+    this.rendererFolder.add(renderer, 'debrisExtinction', 0.0, 10.0);
 	this.rendererFolder.add(renderer, 'blackbodyEmission', -20.0, 20.0);
-	
-	this.rendererFolder.add(renderer, 'TtoKelvin', 0.0, 1000.0);
-	
+	this.rendererFolder.add(renderer, 'TtoKelvin', 0.0, 10.0);
 
 	this.rendererFolder.colorA = [renderer.colorA[0]*255.0, renderer.colorA[1]*255.0, renderer.colorA[2]*255.0];
 	let itemA = this.rendererFolder.addColor(this.rendererFolder, 'colorA');
@@ -110,17 +107,20 @@ GUI.prototype.createSimulationSettings = function()
 
     this.simulationFolder = this.gui.addFolder('Simulation');
     
-    this.simulationFolder.add(solver, 'N', 32, 2048).onChange( function(N) { solver.resize(N); } );
+	this.simulationFolder.add(solver, 'Nx', 32, 512).onChange( function(Nx) { solver.resize(Math.floor(Nx), solver.Ny, solver.Nz); } );
+	this.simulationFolder.add(solver, 'Ny', 32, 512).onChange( function(Ny) { solver.resize(solver.Nx, Math.floor(Ny), solver.Nz); } );
+	this.simulationFolder.add(solver, 'Nz', 32, 512).onChange( function(Nz) { solver.resize(solver.Nx, solver.Ny, Math.floor(Nz)); } );
+	this.simulationFolder.add(solver, 'NprojSteps', 1, 256).onChange( function(NprojSteps) { solver.NprojSteps = NprojSteps; solver.reset(); } );
     this.simulationFolder.add(solver, 'timestep', 0.0, 10.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'blastHeight', 0.0, 1.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'blastRadius', 0.0, 1.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'blastTemperature', 0.0, 100.0).onChange( function() { solver.reset(); } );
+    this.simulationFolder.add(solver, 'blastTemperature', 0.0, 1000.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'blastVelocity', 0.0, 1000.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'debrisHeight', 0.0, 1.0).onChange( function() { solver.reset(); } );
 	this.simulationFolder.add(solver, 'debrisFalloff', 0.0, 1.0).onChange( function() { solver.reset(); } );
 	this.simulationFolder.add(solver, 'gravity', -1.0, 0.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'buoyancy', 0.0, 10.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'expansion', 0.0, 10.0).onChange( function() { solver.reset(); } );
+    this.simulationFolder.add(solver, 'buoyancy', 0.0, 0.01).onChange( function() { solver.reset(); } );
+    this.simulationFolder.add(solver, 'expansion', 0.0, 1.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'radiationLoss', 0.0, 1.0).onChange( function() { solver.reset(); } );
 
     let button = { nuke:function(){ solver.reset(); }};

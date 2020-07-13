@@ -3,6 +3,7 @@ precision highp float;
 
 in vec2 vTexCoord;
 
+// Camera
 uniform vec2 resolution;
 uniform vec3 camPos;
 uniform vec3 camDir;
@@ -14,10 +15,17 @@ uniform vec3 volMin;
 uniform vec3 volMax;
 uniform vec3 volCenter;
 
-uniform int N;
+// Geometry
+uniform int Nx;
+uniform int Ny;
+uniform int Nz;
+uniform int Ncol;
+uniform int W;
+uniform int H;
 uniform float dL;
 uniform int Nraymarch;
 
+// Physics
 uniform float debrisExtinction;
 uniform float blackbodyEmission;
 uniform float TtoKelvin;
@@ -76,7 +84,7 @@ void planckianLocus(float T_kelvin, inout float xc, inout float yc)
 
 vec3 tempToRGB(float T_kelvin)
 {
-    if (T_kelvin <= 1000.0) return vec3(0.0);
+    if (T_kelvin <= 1000.0) return vec3(T_kelvin/1000.0, 0.0, 0.0);
     float x, y;
     planckianLocus(T_kelvin, x, y);
     float X = x/y;
@@ -88,20 +96,30 @@ vec3 tempToRGB(float T_kelvin)
     return vec3(R, G, B);
 }
 
+vec2 slicetoUV(int j, vec3 vsP)
+{
+    // Given y-slice index j, and continuous voxel space xz-location,
+    // return corresponding continuous frag UV for interpolation within this slice
+    int row = int(floor(float(j)/float(Ncol)));
+    int col = j - row*Ncol;
+    vec2 uv_ll = vec2(float(col*Nx)/float(W), float(row*Nz)/float(H));
+    float du = vsP.x/float(W);
+    float dv = vsP.z/float(H);
+    return uv_ll + vec2(du, dv);
+}
+
 vec4 interp(in sampler2D S, in vec3 wsP)
 {
     vec3 vsP = wsP / dL;
     float pY = vsP.y - 0.5;
-    int jlo = clamp(int(floor(pY)), 0, N-1); // lower j-slice
-    int jhi = clamp(         jlo+1, 0, N-1); // upper j-slice
-    float flo = float(jhi) - pY;             // lower j fraction
-    float fhi = 1.0 - flo;                   // upper j fraction
-    vec2 resolution = vec2(float(N*N), float(N)); // @todo: precompute
-    float v = vsP.z / resolution.y;
-    float ulo = (vsP.x + float(jlo)*float(N)) / resolution.x;
-    float uhi = (vsP.x + float(jhi)*float(N)) / resolution.x;
-    vec4 Slo = texture(S, vec2(ulo, v));
-    vec4 Shi = texture(S, vec2(uhi, v));
+    int jlo = clamp(int(floor(pY)), 0, Ny-1); // lower j-slice
+    int jhi = clamp(         jlo+1, 0, Ny-1); // upper j-slice
+    float flo = float(jhi) - pY;              // lower j fraction
+    float fhi = 1.0 - flo;                    // upper j fraction
+    vec2 uv_lo = slicetoUV(jlo, vsP);
+    vec2 uv_hi = slicetoUV(jhi, vsP);
+    vec4 Slo = texture(S, uv_lo);
+    vec4 Shi = texture(S, uv_hi);
     return flo*Slo + fhi*Shi;
 }
 
@@ -111,7 +129,7 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     int i = vsP.x;
     int j = vsP.y;
     int k = vsP.z;
-    int ui = N*j + i;
+    int ui = Nx*j + i;
     int vi = k;
     return ivec2(ui, vi);
 }
@@ -138,22 +156,19 @@ void main()
         {
             // transform pMarch into simulation domain:
             vec3 wsP = pMarch - volMin;
-            ivec3 vsP = ivec3(wsP / dL);
-            //vec3 debris = texelFetch(debris_sampler, mapVsToFrag(vsP), 0).rgb;
 
             // Absorption by dust
             vec3 debris = interp(debris_sampler, wsP).rgb;
-
-            vec3 debris_color = vec3(1.0, 1.0, 1.0); // @todo: advect colored absorption/scattering coefficient fields of debris
-            vec3 sigma = debrisExtinction * debris_color * debris;
+            vec3 sigma = debrisExtinction * debris;
             Tr.r *= exp(-sigma.r*dl);
             Tr.g *= exp(-sigma.g*dl);
             Tr.b *= exp(-sigma.b*dl);
 
             // Emit blackbody radiation from hot air
             float T = interp(Tair_sampler, wsP).r;
+
             vec3 blackbody_color = tempToRGB(T * TtoKelvin);
-            vec3 emission = blackbodyEmission * blackbody_color * Tr;
+            vec3 emission = pow(blackbodyEmission*T, 4.0) * blackbody_color * Tr;
             L += emission * dl;
             pMarch += rayDir*dl;
         }
@@ -166,7 +181,7 @@ void main()
     L *= pow(2.0, exposure);
 
     vec2 f = frag/resolution.xy;
-    gbuf_rad = vec4(L, 1.0); //vec4(f.r, f.g, 0.0, 1.0);
+    gbuf_rad = vec4(L, 1.0);
 }
 
 

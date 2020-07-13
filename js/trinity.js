@@ -170,7 +170,7 @@ Trinity.prototype.init = function()
     let domain = this.solver.getDomain();   
     let min     = domain.boundsMin;
     let max     = domain.boundsMax;
-    let center  = domain.center;
+    let center  = domain.boundsCenter;
     let extents = [    (max[0]-min[0]),     (max[1]-min[1]),     (max[2]-min[2])];
     let relDist = [1.5, 0.75, 1.3];
     this.camera.position.set(center[0]+relDist[0]*extents[0], 
