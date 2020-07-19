@@ -5,6 +5,7 @@ uniform int Nx;
 uniform int Ny;
 uniform int Nz;
 uniform int Ncol;
+uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
 uniform float dL;
 
 // Physics
@@ -43,40 +44,61 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     return ivec2(iu, iv);
 }
 
+bool isSolidCell(in ivec3 vsPi)
+{
+    // @todo: expose for generalization
+    vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
+    vec3 wsP = vsP*dL;
+    vec3 C = L/2.0;
+    float r = length(wsP - C);
+    return r <= (L.x/2.5);
+    //return vsPi.y<=1;
+}
+
 void main()
 {
     // Setup local stencil:
     ivec2 frag = ivec2(gl_FragCoord.xy);
-    ivec3 vsX = ivec3(mapFragToVs(frag));
+    ivec3 vsX = ivec3(floor(mapFragToVs(frag)));
     int ix = vsX.x;
     int iy = vsX.y;
     int iz = vsX.z;
 
-    // Apply Neumann boundary conditions
-    ivec2 X_ip = mapVsToFrag(ivec3(min(ix+1, Nx-1), iy, iz));
-    ivec2 X_in = mapVsToFrag(ivec3(max(ix-1,    0), iy, iz));
-    ivec2 X_jp = mapVsToFrag(ivec3(ix, min(iy+1, Ny-1), iz));
-    ivec2 X_jn = mapVsToFrag(ivec3(ix, max(iy-1,    0), iz));
-    ivec2 X_kp = mapVsToFrag(ivec3(ix, iy, min(iz+1, Nz-1)));
-    ivec2 X_kn = mapVsToFrag(ivec3(ix, iy, max(iz-1,    0)));
+    // Apply Neumann boundary conditions at grid boundaries
+    ivec3 X_ip = ivec3(min(ix+1, Nx-1), iy, iz);
+    ivec3 X_in = ivec3(max(ix-1,    0), iy, iz);
+    ivec3 X_jp = ivec3(ix, min(iy+1, Ny-1), iz);
+    ivec3 X_jn = ivec3(ix, max(iy-1,    0), iz);
+    ivec3 X_kp = ivec3(ix, iy, min(iz+1, Nz-1));
+    ivec3 X_kn = ivec3(ix, iy, max(iz-1,    0));
 
     // air velocity at voxel
     vec3 v = texelFetch(Vair_sampler, frag, 0).rgb;
 
-    // Compute local gradient of pressure field
-    float P_xp = texelFetch(Pair_sampler, X_ip, 0).r;
-    float P_xn = texelFetch(Pair_sampler, X_in, 0).r;
-    float P_yp = texelFetch(Pair_sampler, X_jp, 0).r;
-    float P_yn = texelFetch(Pair_sampler, X_jn, 0).r;
-    float P_zp = texelFetch(Pair_sampler, X_kp, 0).r;
-    float P_zn = texelFetch(Pair_sampler, X_kn, 0).r;
-    float dpdx = 0.5*(P_xp - P_xn)/dL;
-    float dpdy = 0.5*(P_yp - P_yn)/dL;
-    float dpdz = 0.5*(P_zp - P_zn)/dL;
-    vec3 gradp = vec3(dpdx, dpdy, dpdz);
+    // Get pressure values at local stencil
+    float  P   = texelFetch(Pair_sampler, frag, 0).r;
+    float P_xp = texelFetch(Pair_sampler, mapVsToFrag(X_ip), 0).r;
+    float P_xn = texelFetch(Pair_sampler, mapVsToFrag(X_in), 0).r;
+    float P_yp = texelFetch(Pair_sampler, mapVsToFrag(X_jp), 0).r;
+    float P_yn = texelFetch(Pair_sampler, mapVsToFrag(X_jn), 0).r;
+    float P_zp = texelFetch(Pair_sampler, mapVsToFrag(X_kp), 0).r;
+    float P_zn = texelFetch(Pair_sampler, mapVsToFrag(X_kn), 0).r;
 
-    // Update air velocity accordingly
-    Vair_output = vec4(v - timestep*gradp, 0.0);
+    // Apply pressure Neumann boundary-condition for solid cells:
+    vec3 vMask = vec3(1.0, 1.0, 1.0);
+    if (isSolidCell(X_ip)) { P_xp = P; vMask.x = 0.0; }
+    if (isSolidCell(X_in)) { P_xn = P; vMask.x = 0.0; }
+    if (isSolidCell(X_jp)) { P_yp = P; vMask.y = 0.0; }
+    if (isSolidCell(X_jn)) { P_yn = P; vMask.y = 0.0; }
+    if (isSolidCell(X_kp)) { P_zp = P; vMask.z = 0.0; }
+    if (isSolidCell(X_kn)) { P_zn = P; vMask.z = 0.0; }
+
+    // Update air velocity accordingly (see "Real-Time Simulation and Rendering of 3D Fluids", Crane et. al)
+    vec3 gradp = 0.5*vec3(P_xp - P_xn, P_yp - P_yn, P_zp - P_zn)/dL;
+    vec3 vnew = v - gradp;
+    vnew = vMask*vnew;
+
+    Vair_output = vec4(vnew, 0.0);
 }
 
 

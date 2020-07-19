@@ -19,19 +19,20 @@ var Solver = function()
     this.compileShaders();
 
     // Defaults
-    this.timestep = 1.0;
-    this.NprojSteps = 32;
-    this.blastHeight = 0.2;
-    this.blastRadius = 0.05;
+    this.timestep = 2.0;
+    this.NprojSteps = 16;
+    this.blastHeight = 0.1;
+    this.blastRadius = 0.15;
     this.blastTemperature = 500.0;   // initial temperature of fireball relative to ambient
-    this.blastVelocity = 0.0;      // outward blast speed in voxels/timestep
-    this.debrisHeight = 0.02;        // maximum height of dust layer, as a fraction of domain height
-    this.debrisFalloff = 0.01;      // fall-off exponent within dust layer
-    this.T0 = 1.0;                  // nominal reference temperature for buoyancy
-    this.buoyancy = 0.004;          // initial buoyancy (thermal expansion coeff. of air)
+    this.blastVelocity = 100.0;        // outward blast speed in voxels/timestep
+    this.debrisHeight = 0.1;        // maximum height of dust layer, as a fraction of domain height
+    this.debrisFalloff = 0.5;       // fall-off exponent within dust layer
+    this.T0       = 266.0;                  // nominal reference temperature for buoyancy
+    this.Tambient = 270.0;                  // nominal reference temperature for buoyancy
+    this.buoyancy = 0.2;           // initial buoyancy (thermal expansion coeff. of air)
     this.expansion = 0.0;
-    this.gravity = -0.5;
-    this.radiationLoss = 0.0;    // radiation loss rate (per timestep fractional absorption)
+    this.gravity = 0.003; //0.5;
+    this.radiationLoss = 0.0;        // radiation loss rate (per timestep fractional absorption)
 
     // Initialize solver
     this.resize(128, 512, 128);
@@ -44,7 +45,6 @@ Solver.prototype.compileShaders = function()
     this.div_program          = new GLU.Shader('div',           this.shaderSources, null);
     this.copy_program         = new GLU.Shader('copy',          this.shaderSources, null);
     this.update_program       = new GLU.Shader('update',        this.shaderSources, null);
-    this.debris_program       = new GLU.Shader('debris',        this.shaderSources, null);
 }
 
 Solver.prototype.resize = function(Nx, Ny, Nz)
@@ -140,7 +140,7 @@ Solver.prototype.initialize = function()
 
     let blast_center = [0.5*L[0], L[1]*this.blastHeight, 0.5*L[2]];
 
-    this.Tambient = this.T0 + 1.0/this.buoyancy; // ambient temp which balances buoyancy and gravity
+    //this.Tambient = this.T0 + 1.0/this.buoyancy; // ambient temp which balances buoyancy and gravity
 
     for (let iy=0; iy<Ny; ++iy)
     {
@@ -263,7 +263,7 @@ Solver.prototype.step = function()
     gl.viewport(0, 0, this.W, this.H);
     this.quadVbo.bind();
 
-    // Run air force/advection step, writing 0 -> 1
+    // Run air/debris force-advection step, writing 0 -> 1
     {
         this.advect_program.bind();
         this.advect_program.uniformI("Nx",             this.domain.Nx);
@@ -282,23 +282,29 @@ Solver.prototype.step = function()
         this.advect_program.uniformF("Tambient",      this.Tambient);
 
         this.fbo.bind();
-        this.fbo.drawBuffers(3);
-        this.fbo.attachTexture(this.Vair[1], 0); // write to  Vair[1]
-        this.fbo.attachTexture(this.Pair[1], 1); // write to  Pair[1]
-        this.fbo.attachTexture(this.Tair[1], 2); // write to  Tair[1]
+        this.fbo.drawBuffers(4);
+        this.fbo.attachTexture(this.Vair[1], 0);   // write to  Vair[1]
+        this.fbo.attachTexture(this.Pair[1], 1);   // write to  Pair[1]
+        this.fbo.attachTexture(this.Tair[1], 2);   // write to  Tair[1]
+        this.fbo.attachTexture(this.debris[1], 3); // write to  debris[1]
+
         this.Vair[0].bind(0);                    // read from Vair[0]
         this.Pair[0].bind(1);                    // read from Pair[0]
         this.Tair[0].bind(2);                    // read from Tair[0]
+        this.debris[0].bind(3);                  // read from debris[0]
         this.advect_program.uniformTexture("Vair_sampler", this.Vair[0]);
         this.advect_program.uniformTexture("Pair_sampler", this.Pair[0]);
         this.advect_program.uniformTexture("Tair_sampler", this.Tair[0]);
+        this.advect_program.uniformTexture("debris_sampler", this.debris[0]);
         this.quadVbo.draw(this.advect_program, gl.TRIANGLE_FAN);
         this.fbo.detachTexture(0);
         this.fbo.detachTexture(1);
         this.fbo.detachTexture(2);
+        this.fbo.detachTexture(3);
         this.fbo.unbind();
 
         // copy temperature 1 -> 0
+        // @todo: get rid of copy and do ping-pong
         this.copy_program.bind();
         this.fbo.bind();
         this.fbo.drawBuffers(1);
@@ -309,6 +315,17 @@ Solver.prototype.step = function()
         this.fbo.detachTexture(0);
         this.fbo.unbind();
 
+        // copy density 1 -> 0
+        // @todo: get rid of copy and do ping-pong
+        this.copy_program.bind();
+        this.fbo.bind();
+        this.fbo.drawBuffers(1);
+        this.fbo.attachTexture(this.debris[0], 0); // write to  debris[0]
+        this.debris[1].bind(0);                    // read from debris[1]
+        this.copy_program.uniformTexture("Qin", this.debris[1]);
+        this.quadVbo.draw(this.copy_program, gl.TRIANGLE_FAN);
+        this.fbo.detachTexture(0);
+        this.fbo.unbind();
     }
 
     gl.bindTexture(gl.TEXTURE_2D, null);
@@ -320,6 +337,7 @@ Solver.prototype.step = function()
         this.div_program.uniformI("Ny",            this.domain.Ny);
         this.div_program.uniformI("Nz",            this.domain.Nz);
         this.div_program.uniformI("Ncol",          this.domain.Ncol);
+        this.div_program.uniform3Fv("L",           this.domain.L);
         this.div_program.uniformF("dL",            this.domain.dL);
 
         this.fbo.bind();
@@ -341,6 +359,7 @@ Solver.prototype.step = function()
         this.project_program.uniformI("Ny",            this.domain.Ny);
         this.project_program.uniformI("Nz",            this.domain.Nz);
         this.project_program.uniformI("Ncol",          this.domain.Ncol);
+        this.project_program.uniform3Fv("L",           this.domain.L);
         this.project_program.uniformF("dL",            this.domain.dL);
         this.project_program.uniformF("timestep",  this.timestep);
         this.project_program.uniformF("expansion", this.expansion);
@@ -391,6 +410,7 @@ Solver.prototype.step = function()
         this.update_program.uniformI("Ny",            this.domain.Ny);
         this.update_program.uniformI("Nz",            this.domain.Nz);
         this.update_program.uniformI("Ncol",          this.domain.Ncol);
+        this.update_program.uniform3Fv("L",           this.domain.L);
         this.update_program.uniformF("dL",            this.domain.dL);
         this.update_program.uniformF("timestep", this.timestep);
 
@@ -409,46 +429,6 @@ Solver.prototype.step = function()
     gl.bindTexture(gl.TEXTURE_2D, null);
     this.fbo.detachTexture(0);
     this.fbo.unbind();
-
-    // Advect debris in air flow
-    {
-        // write debris 0 -> 1
-        this.debris_program.bind();
-        this.debris_program.uniformI("Nx",            this.domain.Nx);
-        this.debris_program.uniformI("Ny",            this.domain.Ny);
-        this.debris_program.uniformI("Nz",            this.domain.Nz);
-        this.debris_program.uniformI("Ncol",          this.domain.Ncol);
-        this.debris_program.uniformI("W",             this.domain.W);
-        this.debris_program.uniformI("H",             this.domain.H);
-        this.debris_program.uniform3Fv("L",           this.domain.L);
-        this.debris_program.uniformF("dL",            this.domain.dL);
-        this.debris_program.uniformF("timestep", this.timestep);
-        this.fbo.bind();
-        this.fbo.drawBuffers(1);
-        this.fbo.attachTexture(this.debris[1], 0); // write to  debris[1]
-        this.debris[0].bind(0);                    // read from debris[0]
-        this.Vair[1].bind(1);                      // read from Vair[1]
-        this.debris_program.uniformTexture("debris_sampler", this.debris[0]);
-        this.debris_program.uniformTexture("Vair_sampler",   this.Vair[1]);
-        this.quadVbo.draw(this.debris_program, gl.TRIANGLE_FAN);
-        this.fbo.detachTexture(0);
-        this.fbo.unbind();
-
-        gl.bindTexture(gl.TEXTURE_2D, null);
-
-        // copy debris 1 -> 0
-        this.copy_program.bind();
-        this.fbo.bind();
-        this.fbo.drawBuffers(1);
-        this.fbo.attachTexture(this.debris[0], 0); // write to  debris[0]
-        this.debris[1].bind(0);                    // read from debris[1]
-        this.copy_program.uniformTexture("Qin", this.debris[1]);
-        this.quadVbo.draw(this.copy_program, gl.TRIANGLE_FAN);
-        this.fbo.detachTexture(0);
-        this.fbo.unbind();
-    }
-
-    gl.bindTexture(gl.TEXTURE_2D, null);
 
     /*
     this.fbo.bind();

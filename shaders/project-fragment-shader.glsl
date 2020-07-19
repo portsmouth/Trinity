@@ -5,6 +5,7 @@ uniform int Nx;
 uniform int Ny;
 uniform int Nz;
 uniform int Ncol;
+uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
 uniform float dL;
 
 // Physics
@@ -46,48 +47,66 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     return ivec2(iu, iv);
 }
 
+bool isSolidCell(in ivec3 vsPi)
+{
+    // @todo: expose for generalization
+    vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
+    vec3 wsP = vsP*dL;
+    vec3 C = L/2.0;
+    float r = length(wsP - C);
+    return r <= (L.x/2.5);
+    //return vsPi.y<=1;
+}
+
 void main()
 {
     ivec2 frag = ivec2(gl_FragCoord.xy);
-    ivec3 vsX = ivec3(mapFragToVs(frag));
+    ivec3 vsX = ivec3(floor(mapFragToVs(frag)));
     int ix = vsX.x;
     int iy = vsX.y;
     int iz = vsX.z;
 
-    // Apply Neumann boundary conditions
-    ivec2 X_ip = mapVsToFrag(ivec3(min(ix+1, Nx-1), iy, iz));
-    ivec2 X_in = mapVsToFrag(ivec3(max(ix-1,    0), iy, iz));
-    ivec2 X_jp = mapVsToFrag(ivec3(ix, min(iy+1, Ny-1), iz));
-    ivec2 X_jn = mapVsToFrag(ivec3(ix, max(iy-1,    0), iz));
-    ivec2 X_kp = mapVsToFrag(ivec3(ix, iy, min(iz+1, Nz-1)));
-    ivec2 X_kn = mapVsToFrag(ivec3(ix, iy, max(iz-1,    0)));
+    // Apply Neumann boundary conditions at grid boundaries
+    ivec3 X_ip = ivec3(min(ix+1, Nx-1), iy, iz);
+    ivec3 X_in = ivec3(max(ix-1,    0), iy, iz);
+    ivec3 X_jp = ivec3(ix, min(iy+1, Ny-1), iz);
+    ivec3 X_jn = ivec3(ix, max(iy-1,    0), iz);
+    ivec3 X_kp = ivec3(ix, iy, min(iz+1, Nz-1));
+    ivec3 X_kn = ivec3(ix, iy, max(iz-1,    0));
 
     // Get air pressure, temperature and velocity divergence at voxel
-    float P    = texelFetch(Pair_sampler, frag, 0).x;
-    float T    = texelFetch(Tair_sampler, frag, 0).x;
-    float divv = texelFetch(divVair_sampler, frag, 0).x;
+    float P     = texelFetch(Pair_sampler, frag, 0).x;
+    float T     = texelFetch(Tair_sampler, frag, 0).x;
+    float div_v = texelFetch(divVair_sampler, frag, 0).x;
 
     // Introduce local expansion due to heated fluid
-    float phi = timestep * expansion * T;
-    divv -= phi;
+    div_v -= timestep * expansion * T;
 
     // Get pressure values at local stencil
-    float P_xp = texelFetch(Pair_sampler, X_ip, 0).r;
-    float P_xn = texelFetch(Pair_sampler, X_in, 0).r;
-    float P_yp = texelFetch(Pair_sampler, X_jp, 0).r;
-    float P_yn = texelFetch(Pair_sampler, X_jn, 0).r;
-    float P_zp = texelFetch(Pair_sampler, X_kp, 0).r;
-    float P_zn = texelFetch(Pair_sampler, X_kn, 0).r;
+    float P_xp = texelFetch(Pair_sampler, mapVsToFrag(X_ip), 0).r;
+    float P_xn = texelFetch(Pair_sampler, mapVsToFrag(X_in), 0).r;
+    float P_yp = texelFetch(Pair_sampler, mapVsToFrag(X_jp), 0).r;
+    float P_yn = texelFetch(Pair_sampler, mapVsToFrag(X_jn), 0).r;
+    float P_zp = texelFetch(Pair_sampler, mapVsToFrag(X_kp), 0).r;
+    float P_zn = texelFetch(Pair_sampler, mapVsToFrag(X_kn), 0).r;
+
+    // Apply pressure Neumann boundary-condition for solid cells:
+    if (isSolidCell(X_ip)) P_xp = P;
+    if (isSolidCell(X_in)) P_xn = P;
+    if (isSolidCell(X_jp)) P_yp = P;
+    if (isSolidCell(X_jn)) P_yn = P;
+    if (isSolidCell(X_kp)) P_zp = P;
+    if (isSolidCell(X_kn)) P_zn = P;
 
     // Thus compute Jacobi-relaxation solution of Poisson equation:
-    //   Laplacian[p] = Divergence[v] / timestep
-    float rhs = divv; // / timestep;
+    //   Laplacian[p] = Divergence[v]
     float avgp = (P_xp + P_xn + P_yp + P_yn + P_zp + P_zn) / 6.0;
 
-    // @todo: what is the "correct" normalization here?
-
-    float P_relax = avgp - dL*dL*rhs/6.0; // (See Numerical Recipes 19.5.5, extended to 3d)
-    //float P_relax = avgp - rhs/6.0; // (See Numerical Recipes 19.5.5, extended to 3d)
+    // For the pressure projection formula, see:
+    //  - "Fast Fluid Dynamics Simulation on the GPU", Harris
+    //  - "Real-Time Simulation and Rendering of 3D Fluids", Crane et. al
+    //  - Numerical Recipes 19.5.5, extended to 3d
+    float P_relax = avgp - dL*dL*div_v/6.0;
 
     Pair_output = vec4(P_relax);
 }

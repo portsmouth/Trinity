@@ -21,15 +21,16 @@ uniform float Tambient;       // temperature which generates buoyancy which bala
 in vec2 v_texcoord;
 
 /////// input buffers ///////
-uniform sampler2D Vair_sampler; // 0, vec3 velocity field
-uniform sampler2D Pair_sampler; // 1, float pressure field
-uniform sampler2D Tair_sampler; // 2, float temperature field
+uniform sampler2D Vair_sampler;   // 0, vec3 velocity field
+uniform sampler2D Pair_sampler;   // 1, float pressure field
+uniform sampler2D Tair_sampler;   // 2, float temperature field
+uniform sampler2D debris_sampler; // 3, float debris density field
 
 /////// output buffers ///////
 layout(location = 0) out vec4 Vair_output;
 layout(location = 1) out vec4 Pair_output;
 layout(location = 2) out vec4 Tair_output;
-
+layout(location = 3) out vec4 debris_output;
 
 vec3 mapFragToVs(in ivec2 frag)
 {
@@ -71,14 +72,31 @@ vec4 interp(in sampler2D S, in vec3 wsP)
     return flo*Slo + fhi*Shi;
 }
 
-vec3 back_advect(vec3 wsX, vec3 vX, float h)
+vec3 clampToBounds(in vec3 wsX)
+{
+    vec3 halfVoxel = vec3(dL);
+    return clamp(wsX, halfVoxel, L-halfVoxel);
+}
+
+vec3 back_advect(in vec3 wsX, in vec3 vX, float h)
 {
     // RK4 integration for position wsX advected backwards through time h:
     vec3 k1 = vX;
-    vec3 k2 = interp(Vair_sampler, wsX - 0.5*h*k1).xyz;
-    vec3 k3 = interp(Vair_sampler, wsX - 0.5*h*k2).xyz;
-    vec3 k4 = interp(Vair_sampler, wsX -     h*k3).xyz;
-    return clamp(wsX - h*(k1 + 2.0*k2 + 2.0*k3 + k4)/6.0, vec3(dL), L-vec3(dL));
+    vec3 k2 = interp(Vair_sampler, clampToBounds(wsX - 0.5*h*k1)).xyz;
+    vec3 k3 = interp(Vair_sampler, clampToBounds(wsX - 0.5*h*k2)).xyz;
+    vec3 k4 = interp(Vair_sampler, clampToBounds(wsX -     h*k3)).xyz;
+    return clampToBounds(wsX - h*(k1 + 2.0*k2 + 2.0*k3 + k4)/6.0);
+}
+
+bool isSolidCell(in ivec3 vsPi)
+{
+    // @todo: expose for generalization
+    vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
+    vec3 wsP = vsP*dL;
+    vec3 C = L/2.0;
+    float r = length(wsP - C);
+    return r <= (L.x/2.5);
+    //return vsPi.y<=1;
 }
 
 void main()
@@ -86,30 +104,46 @@ void main()
     // fragment range over [N*N, N] space
     ivec2 frag = ivec2(gl_FragCoord.xy);
     vec3 vsX = mapFragToVs(frag);
-    vec3 wsX = vsX*dL;
+    ivec3 vsXi = ivec3(floor(vsX));
 
-    // Apply semi-Lagrangian advection
-    vec3 v0  = texelFetch(Vair_sampler, frag, 0).xyz;
-    vec3 wsXp = back_advect(wsX, v0, timestep); // @todo: clamp to stay in grid bounds
-    vec3  v = interp(Vair_sampler, wsXp).rgb;
-    float P = interp(Pair_sampler, wsXp).x;
-    float T = interp(Tair_sampler, wsXp).x;
+    /*
+    if (isSolidCell(vsXi))
+    {
+        Vair_output = vec4(0.0);
+        Pair_output = vec4(0.0);
+        Tair_output = vec4(0.0);
+        debris_output = vec4(0.0);
+    }
+    else
+    */
+    {
+        // Apply semi-Lagrangian advection
+        vec3 v0 = texelFetch(Vair_sampler, frag, 0).xyz;
+        vec3 wsX = vsX*dL;
+        vec3 wsXp = back_advect(wsX, v0, timestep);
 
-    // Apply thermal relaxation to ambient temperature due to "radiation loss"
-    float dT = T - Tambient;
-    T = Tambient + dT*exp(-radiationLoss);
+       //ivec3 vsXpi = ivec3(floor(wsXp/dL));
+        //if (isSolidCell(vsXpi))
 
-    // Apply gravity + buoyancy force
-    float buoyancy_expansion = buoyancy*(T - T0);
-    v.y += timestep * gravity * (1.0 - buoyancy_expansion);
 
-    // Apply solid boundary condition at y=0
-    ivec3 vsI = ivec3(vsX);
-    if (vsI.y==0) v.y = 0.0;
+        vec3  v = interp(Vair_sampler, wsXp).rgb;
+        float P = interp(Pair_sampler, wsXp).x;
+        float T = interp(Tair_sampler, wsXp).x;
+        float debris = interp(debris_sampler, wsXp).x;
 
-    Vair_output = vec4(v, 0.0);
-    Pair_output = vec4(P);
-    Tair_output = vec4(T);
+        // Apply thermal relaxation to ambient temperature due to "radiation loss"
+        float dT = T - Tambient;
+        T = Tambient + dT*exp(-radiationLoss);
+
+        // Apply gravity + buoyancy force
+        float buoyancy_force = -gravity + gravity*buoyancy*(T - T0);
+        v.y += timestep * buoyancy_force;
+
+        Vair_output = vec4(v, 0.0);
+        Pair_output = vec4(P);
+        Tair_output = vec4(T);
+        debris_output = vec4(debris);
+    }
 }
 
 

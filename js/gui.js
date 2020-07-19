@@ -58,7 +58,7 @@ GUI.prototype.createRendererSettings = function()
 
 	this.rendererFolder.add(renderer, 'exposure', -10.0, 10.0);
 	this.rendererFolder.add(renderer, 'gamma', 1.0, 3.0);
-    this.rendererFolder.add(renderer, 'debrisExtinction', 0.0, 10.0);
+    this.rendererFolder.add(renderer, 'debrisExtinction', 0.0, 100.0);
 	this.rendererFolder.add(renderer, 'blackbodyEmission', -20.0, 20.0);
 	this.rendererFolder.add(renderer, 'TtoKelvin', 0.0, 10.0);
 
@@ -114,12 +114,14 @@ GUI.prototype.createSimulationSettings = function()
     this.simulationFolder.add(solver, 'timestep', 0.0, 10.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'blastHeight', 0.0, 1.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'blastRadius', 0.0, 1.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'blastTemperature', 0.0, 1000.0).onChange( function() { solver.reset(); } );
+    this.simulationFolder.add(solver, 'blastTemperature', 0.0, 100000.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'blastVelocity', 0.0, 1000.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'debrisHeight', 0.0, 1.0).onChange( function() { solver.reset(); } );
 	this.simulationFolder.add(solver, 'debrisFalloff', 0.0, 1.0).onChange( function() { solver.reset(); } );
-	this.simulationFolder.add(solver, 'gravity', -1.0, 0.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'buoyancy', 0.0, 0.01).onChange( function() { solver.reset(); } );
+	this.simulationFolder.add(solver, 'gravity', 0.0, 1.0).onChange( function() { solver.reset(); } );
+	this.simulationFolder.add(solver, 'T0', 0.0, 1000.0).onChange( function() { solver.reset(); } );
+	this.simulationFolder.add(solver, 'Tambient', 0.0, 1000.0).onChange( function() { solver.reset(); } );
+    this.simulationFolder.add(solver, 'buoyancy', 0.0, 1.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'expansion', 0.0, 1.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'radiationLoss', 0.0, 1.0).onChange( function() { solver.reset(); } );
 

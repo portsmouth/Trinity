@@ -5,6 +5,7 @@ uniform int Nx;
 uniform int Ny;
 uniform int Nz;
 uniform int Ncol;
+uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
 uniform float dL;
 
 /////// input buffers ///////
@@ -40,30 +41,49 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     return ivec2(iu, iv);
 }
 
+bool isSolidCell(in ivec3 vsPi)
+{
+    // @todo: expose for generalization
+    vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
+    vec3 wsP = vsP*dL;
+    vec3 C = L/2.0;
+    float r = length(wsP - C);
+    return r <= (L.x/2.5);
+    //return vsPi.y<=1;
+}
+
 void main()
 {
     ivec2 frag = ivec2(gl_FragCoord.xy);
-    ivec3 vsX = ivec3(mapFragToVs(frag));
+    ivec3 vsX = ivec3(floor(mapFragToVs(frag)));
     int ix = vsX.x;
     int iy = vsX.y;
     int iz = vsX.z;
 
-    // Apply Neumann boundary conditions
-    ivec2 X_ip = mapVsToFrag(ivec3(min(ix+1, Nx-1), iy, iz));
-    ivec2 X_in = mapVsToFrag(ivec3(max(ix-1,    0), iy, iz));
-    ivec2 X_jp = mapVsToFrag(ivec3(ix, min(iy+1, Ny-1), iz));
-    ivec2 X_jn = mapVsToFrag(ivec3(ix, max(iy-1,    0), iz));
-    ivec2 X_kp = mapVsToFrag(ivec3(ix, iy, min(iz+1, Nz-1)));
-    ivec2 X_kn = mapVsToFrag(ivec3(ix, iy, max(iz-1,    0)));
+    // Apply Neumann boundary conditions at grid boundaries
+    ivec3 X_ip = ivec3(min(ix+1, Nx-1), iy, iz);
+    ivec3 X_in = ivec3(max(ix-1,    0), iy, iz);
+    ivec3 X_jp = ivec3(ix, min(iy+1, Ny-1), iz);
+    ivec3 X_jn = ivec3(ix, max(iy-1,    0), iz);
+    ivec3 X_kp = ivec3(ix, iy, min(iz+1, Nz-1));
+    ivec3 X_kn = ivec3(ix, iy, max(iz-1,    0));
 
-    vec4 V_xp = texelFetch(Vair_sampler, X_ip, 0);
-    vec4 V_xn = texelFetch(Vair_sampler, X_in, 0);
-    vec4 V_yp = texelFetch(Vair_sampler, X_jp, 0);
-    vec4 V_yn = texelFetch(Vair_sampler, X_jn, 0);
-    vec4 V_zp = texelFetch(Vair_sampler, X_kp, 0);
-    vec4 V_zn = texelFetch(Vair_sampler, X_kn, 0);
+    float V_xp = texelFetch(Vair_sampler, mapVsToFrag(X_ip), 0).x;
+    float V_xn = texelFetch(Vair_sampler, mapVsToFrag(X_in), 0).x;
+    float V_yp = texelFetch(Vair_sampler, mapVsToFrag(X_jp), 0).y;
+    float V_yn = texelFetch(Vair_sampler, mapVsToFrag(X_jn), 0).y;
+    float V_zp = texelFetch(Vair_sampler, mapVsToFrag(X_kp), 0).z;
+    float V_zn = texelFetch(Vair_sampler, mapVsToFrag(X_kn), 0).z;
 
-    float divVair = 0.5 * (V_xp.x - V_xn.x + V_yp.y - V_yn.y + V_zp.z - V_zn.z) / dL;
+    // Apply solid no-slip boundary conditions
+    if (isSolidCell(X_ip)) V_xp = 0.0;
+    if (isSolidCell(X_in)) V_xn = 0.0;
+    if (isSolidCell(X_jp)) V_yp = 0.0;
+    if (isSolidCell(X_jn)) V_yn = 0.0;
+    if (isSolidCell(X_kp)) V_zp = 0.0;
+    if (isSolidCell(X_kn)) V_zn = 0.0;
+
+    float divVair = 0.5 * ((V_xp - V_xn) + (V_yp - V_yn) + (V_zp - V_zn)) / dL;
     divVair_output = vec4(divVair);
 }
 

@@ -22,6 +22,7 @@ uniform int Nz;
 uniform int Ncol;
 uniform int W;
 uniform int H;
+uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
 uniform float dL;
 uniform int Nraymarch;
 
@@ -123,6 +124,12 @@ vec4 interp(in sampler2D S, in vec3 wsP)
     return flo*Slo + fhi*Shi;
 }
 
+vec3 clampToBounds(in vec3 wsX)
+{
+    vec3 halfVoxel = vec3(dL);
+    return clamp(wsX, halfVoxel, L-halfVoxel);
+}
+
 ivec2 mapVsToFrag(in ivec3 vsP)
 {
     // map integer voxel space coords to the corresponding fragment coords
@@ -158,7 +165,7 @@ void main()
             vec3 wsP = pMarch - volMin;
 
             // Absorption by dust
-            vec3 debris = interp(debris_sampler, wsP).rgb;
+            vec3 debris = interp(debris_sampler, clampToBounds(wsP)).rgb;
             vec3 sigma = debrisExtinction * debris;
             Tr.r *= exp(-sigma.r*dl);
             Tr.g *= exp(-sigma.g*dl);

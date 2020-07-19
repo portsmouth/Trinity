@@ -10,8 +10,8 @@ var Renderer = function()
     this.gamma = 2.2;
     this.colorA = [1.0,0.8,0.5];
     this.colorB = [1.0,0.8,0.5];
-    this.blackbodyEmission = -10.0;
-    this.debrisExtinction = 0.8;
+    this.blackbodyEmission = -9.5;
+    this.debrisExtinction = 40.0;
     this.TtoKelvin = 4.0;
 
     // Internal buffers and programs
@@ -190,6 +190,7 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniformI("Ncol",           domain.Ncol);
         this.volumeProgram.uniformI("W",              domain.W);
         this.volumeProgram.uniformI("H",              domain.H);
+        this.volumeProgram.uniform3Fv("L",            domain.L);
         this.volumeProgram.uniformF("dL",             domain.dL);
         this.volumeProgram.uniformI("Nraymarch", 256);
 

@@ -24,15 +24,16 @@ uniform float Tambient;       // temperature which generates buoyancy which bala
 in vec2 v_texcoord;
 
 /////// input buffers ///////
-uniform sampler2D Vair_sampler; // 0, vec3 velocity field
-uniform sampler2D Pair_sampler; // 1, float pressure field
-uniform sampler2D Tair_sampler; // 2, float temperature field
+uniform sampler2D Vair_sampler;   // 0, vec3 velocity field
+uniform sampler2D Pair_sampler;   // 1, float pressure field
+uniform sampler2D Tair_sampler;   // 2, float temperature field
+uniform sampler2D debris_sampler; // 3, float debris density field
 
 /////// output buffers ///////
 layout(location = 0) out vec4 Vair_output;
 layout(location = 1) out vec4 Pair_output;
 layout(location = 2) out vec4 Tair_output;
-
+layout(location = 3) out vec4 debris_output;
 
 vec3 mapFragToVs(in ivec2 frag)
 {
@@ -74,14 +75,31 @@ vec4 interp(in sampler2D S, in vec3 wsP)
     return flo*Slo + fhi*Shi;
 }
 
-vec3 back_advect(vec3 wsX, vec3 vX, float h)
+vec3 clampToBounds(in vec3 wsX)
+{
+    vec3 halfVoxel = vec3(dL);
+    return clamp(wsX, halfVoxel, L-halfVoxel);
+}
+
+vec3 back_advect(in vec3 wsX, in vec3 vX, float h)
 {
     // RK4 integration for position wsX advected backwards through time h:
     vec3 k1 = vX;
-    vec3 k2 = interp(Vair_sampler, wsX - 0.5*h*k1).xyz;
-    vec3 k3 = interp(Vair_sampler, wsX - 0.5*h*k2).xyz;
-    vec3 k4 = interp(Vair_sampler, wsX -     h*k3).xyz;
-    return clamp(wsX - h*(k1 + 2.0*k2 + 2.0*k3 + k4)/6.0, vec3(dL), L-vec3(dL));
+    vec3 k2 = interp(Vair_sampler, clampToBounds(wsX - 0.5*h*k1)).xyz;
+    vec3 k3 = interp(Vair_sampler, clampToBounds(wsX - 0.5*h*k2)).xyz;
+    vec3 k4 = interp(Vair_sampler, clampToBounds(wsX -     h*k3)).xyz;
+    return clampToBounds(wsX - h*(k1 + 2.0*k2 + 2.0*k3 + k4)/6.0);
+}
+
+bool isSolidCell(in ivec3 vsPi)
+{
+    // @todo: expose for generalization
+    vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
+    vec3 wsP = vsP*dL;
+    vec3 C = L/2.0;
+    float r = length(wsP - C);
+    return r <= (L.x/2.5);
+    //return vsPi.y<=1;
 }
 
 void main()
@@ -89,30 +107,46 @@ void main()
     // fragment range over [N*N, N] space
     ivec2 frag = ivec2(gl_FragCoord.xy);
     vec3 vsX = mapFragToVs(frag);
-    vec3 wsX = vsX*dL;
+    ivec3 vsXi = ivec3(floor(vsX));
 
-    // Apply semi-Lagrangian advection
-    vec3 v0  = texelFetch(Vair_sampler, frag, 0).xyz;
-    vec3 wsXp = back_advect(wsX, v0, timestep); // @todo: clamp to stay in grid bounds
-    vec3  v = interp(Vair_sampler, wsXp).rgb;
-    float P = interp(Pair_sampler, wsXp).x;
-    float T = interp(Tair_sampler, wsXp).x;
+    /*
+    if (isSolidCell(vsXi))
+    {
+        Vair_output = vec4(0.0);
+        Pair_output = vec4(0.0);
+        Tair_output = vec4(0.0);
+        debris_output = vec4(0.0);
+    }
+    else
+    */
+    {
+        // Apply semi-Lagrangian advection
+        vec3 v0 = texelFetch(Vair_sampler, frag, 0).xyz;
+        vec3 wsX = vsX*dL;
+        vec3 wsXp = back_advect(wsX, v0, timestep);
 
-    // Apply thermal relaxation to ambient temperature due to "radiation loss"
-    float dT = T - Tambient;
-    T = Tambient + dT*exp(-radiationLoss);
+       //ivec3 vsXpi = ivec3(floor(wsXp/dL));
+        //if (isSolidCell(vsXpi))
 
-    // Apply gravity + buoyancy force
-    float buoyancy_expansion = buoyancy*(T - T0);
-    v.y += timestep * gravity * (1.0 - buoyancy_expansion);
 
-    // Apply solid boundary condition at y=0
-    ivec3 vsI = ivec3(vsX);
-    if (vsI.y==0) v.y = 0.0;
+        vec3  v = interp(Vair_sampler, wsXp).rgb;
+        float P = interp(Pair_sampler, wsXp).x;
+        float T = interp(Tair_sampler, wsXp).x;
+        float debris = interp(debris_sampler, wsXp).x;
 
-    Vair_output = vec4(v, 0.0);
-    Pair_output = vec4(P);
-    Tair_output = vec4(T);
+        // Apply thermal relaxation to ambient temperature due to "radiation loss"
+        float dT = T - Tambient;
+        T = Tambient + dT*exp(-radiationLoss);
+
+        // Apply gravity + buoyancy force
+        float buoyancy_force = -gravity + gravity*buoyancy*(T - T0);
+        v.y += timestep * buoyancy_force;
+
+        Vair_output = vec4(v, 0.0);
+        Pair_output = vec4(P);
+        Tair_output = vec4(T);
+        debris_output = vec4(debris);
+    }
 }
 `,
 
@@ -160,111 +194,6 @@ void main()
 }
 `,
 
-'debris-fragment-shader': `#version 300 es
-precision highp float;
-
-// Geometry
-uniform int Nx;
-uniform int Ny;
-uniform int Nz;
-uniform int Ncol;
-uniform int W;
-uniform int H;
-uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
-uniform float dL;
-
-// Physics
-uniform float timestep;
-
-in vec2 v_texcoord;
-
-/////// input buffers ///////
-uniform sampler2D debris_sampler; // 0, float debris density field
-uniform sampler2D Vair_sampler;   // 1, vec3 velocity field
-
-/////// output buffers ///////
-layout(location = 0) out vec4 debris_output;
-
-vec3 mapFragToVs(in ivec2 frag)
-{
-    // map fragment coord in [W, H] to continuous position of corresponding voxel center in voxel space
-    int iu = frag.x;
-    int iv = frag.y;
-    int row = int(floor(float(iv)/float(Nz)));
-    int col = int(floor(float(iu)/float(Nx)));
-    int i = iu - col*Nx;
-    int j = col + row*Ncol;
-    int k = iv - row*Nz;
-    return vec3(ivec3(i, j, k)) + vec3(0.5);
-}
-
-vec2 slicetoUV(int j, vec3 vsP)
-{
-    // Given y-slice index j, and continuous voxel space xz-location,
-    // return corresponding continuous frag UV for interpolation within this slice
-    int row = int(floor(float(j)/float(Ncol)));
-    int col = j - row*Ncol;
-    vec2 uv_ll = vec2(float(col*Nx)/float(W), float(row*Nz)/float(H));
-    float du = vsP.x/float(W);
-    float dv = vsP.z/float(H);
-    return uv_ll + vec2(du, dv);
-}
-
-vec4 interp(in sampler2D S, in vec3 wsP)
-{
-    vec3 vsP = wsP / dL;
-    float pY = vsP.y - 0.5;
-    int jlo = clamp(int(floor(pY)), 0, Ny-1); // lower j-slice
-    int jhi = clamp(         jlo+1, 0, Ny-1); // upper j-slice
-    float flo = float(jhi) - pY;              // lower j fraction
-    float fhi = 1.0 - flo;                    // upper j fraction
-    vec2 uv_lo = slicetoUV(jlo, vsP);
-    vec2 uv_hi = slicetoUV(jhi, vsP);
-    vec4 Slo = texture(S, uv_lo);
-    vec4 Shi = texture(S, uv_hi);
-    return flo*Slo + fhi*Shi;
-}
-
-vec3 back_advect(vec3 wsX, vec3 vX, float h)
-{
-    // RK4 integration for position wsX advected backwards through time h:
-    vec3 k1 = vX;
-    vec3 k2 = interp(Vair_sampler, wsX - 0.5*h*k1).xyz;
-    vec3 k3 = interp(Vair_sampler, wsX - 0.5*h*k2).xyz;
-    vec3 k4 = interp(Vair_sampler, wsX -     h*k3).xyz;
-    return clamp(wsX - h*(k1 + 2.0*k2 + 2.0*k3 + k4)/6.0, vec3(dL), L-vec3(dL));
-}
-
-void main()
-{
-    // fragment range over [N*N, N] space
-    ivec2 frag = ivec2(gl_FragCoord.xy);
-    vec3 vsX = mapFragToVs(frag);
-    vec3 wsX = vsX*dL;
-
-    // Apply semi-Lagrangian advection
-    vec3 v0 = texelFetch(Vair_sampler, frag, 0).rgb;
-    vec3 wsXp = back_advect(wsX, v0, timestep);
-    vec3 debris_p = interp(debris_sampler, wsXp).rgb;
-    debris_output = vec4(debris_p, 1.0);
-}
-`,
-
-'debris-vertex-shader': `#version 300 es
-precision highp float;
-
-in vec3 Position;
-in vec2 TexCoord;
-
-out vec2 v_texcoord;
-
-void main() 
-{
-    gl_Position = vec4(Position, 1.0);
-    v_texcoord = TexCoord;
-}
-`,
-
 'div-fragment-shader': `#version 300 es
 precision highp float;
 
@@ -273,6 +202,7 @@ uniform int Nx;
 uniform int Ny;
 uniform int Nz;
 uniform int Ncol;
+uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
 uniform float dL;
 
 /////// input buffers ///////
@@ -308,30 +238,49 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     return ivec2(iu, iv);
 }
 
+bool isSolidCell(in ivec3 vsPi)
+{
+    // @todo: expose for generalization
+    vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
+    vec3 wsP = vsP*dL;
+    vec3 C = L/2.0;
+    float r = length(wsP - C);
+    return r <= (L.x/2.5);
+    //return vsPi.y<=1;
+}
+
 void main()
 {
     ivec2 frag = ivec2(gl_FragCoord.xy);
-    ivec3 vsX = ivec3(mapFragToVs(frag));
+    ivec3 vsX = ivec3(floor(mapFragToVs(frag)));
     int ix = vsX.x;
     int iy = vsX.y;
     int iz = vsX.z;
 
-    // Apply Neumann boundary conditions
-    ivec2 X_ip = mapVsToFrag(ivec3(min(ix+1, Nx-1), iy, iz));
-    ivec2 X_in = mapVsToFrag(ivec3(max(ix-1,    0), iy, iz));
-    ivec2 X_jp = mapVsToFrag(ivec3(ix, min(iy+1, Ny-1), iz));
-    ivec2 X_jn = mapVsToFrag(ivec3(ix, max(iy-1,    0), iz));
-    ivec2 X_kp = mapVsToFrag(ivec3(ix, iy, min(iz+1, Nz-1)));
-    ivec2 X_kn = mapVsToFrag(ivec3(ix, iy, max(iz-1,    0)));
+    // Apply Neumann boundary conditions at grid boundaries
+    ivec3 X_ip = ivec3(min(ix+1, Nx-1), iy, iz);
+    ivec3 X_in = ivec3(max(ix-1,    0), iy, iz);
+    ivec3 X_jp = ivec3(ix, min(iy+1, Ny-1), iz);
+    ivec3 X_jn = ivec3(ix, max(iy-1,    0), iz);
+    ivec3 X_kp = ivec3(ix, iy, min(iz+1, Nz-1));
+    ivec3 X_kn = ivec3(ix, iy, max(iz-1,    0));
 
-    vec4 V_xp = texelFetch(Vair_sampler, X_ip, 0);
-    vec4 V_xn = texelFetch(Vair_sampler, X_in, 0);
-    vec4 V_yp = texelFetch(Vair_sampler, X_jp, 0);
-    vec4 V_yn = texelFetch(Vair_sampler, X_jn, 0);
-    vec4 V_zp = texelFetch(Vair_sampler, X_kp, 0);
-    vec4 V_zn = texelFetch(Vair_sampler, X_kn, 0);
+    float V_xp = texelFetch(Vair_sampler, mapVsToFrag(X_ip), 0).x;
+    float V_xn = texelFetch(Vair_sampler, mapVsToFrag(X_in), 0).x;
+    float V_yp = texelFetch(Vair_sampler, mapVsToFrag(X_jp), 0).y;
+    float V_yn = texelFetch(Vair_sampler, mapVsToFrag(X_jn), 0).y;
+    float V_zp = texelFetch(Vair_sampler, mapVsToFrag(X_kp), 0).z;
+    float V_zn = texelFetch(Vair_sampler, mapVsToFrag(X_kn), 0).z;
 
-    float divVair = 0.5 * (V_xp.x - V_xn.x + V_yp.y - V_yn.y + V_zp.z - V_zn.z) / dL;
+    // Apply solid no-slip boundary conditions
+    if (isSolidCell(X_ip)) V_xp = 0.0;
+    if (isSolidCell(X_in)) V_xn = 0.0;
+    if (isSolidCell(X_jp)) V_yp = 0.0;
+    if (isSolidCell(X_jn)) V_yn = 0.0;
+    if (isSolidCell(X_kp)) V_zp = 0.0;
+    if (isSolidCell(X_kn)) V_zn = 0.0;
+
+    float divVair = 0.5 * ((V_xp - V_xn) + (V_yp - V_yn) + (V_zp - V_zn)) / dL;
     divVair_output = vec4(divVair);
 }
 `,
@@ -382,6 +331,7 @@ uniform int Nx;
 uniform int Ny;
 uniform int Nz;
 uniform int Ncol;
+uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
 uniform float dL;
 
 // Physics
@@ -423,48 +373,66 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     return ivec2(iu, iv);
 }
 
+bool isSolidCell(in ivec3 vsPi)
+{
+    // @todo: expose for generalization
+    vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
+    vec3 wsP = vsP*dL;
+    vec3 C = L/2.0;
+    float r = length(wsP - C);
+    return r <= (L.x/2.5);
+    //return vsPi.y<=1;
+}
+
 void main()
 {
     ivec2 frag = ivec2(gl_FragCoord.xy);
-    ivec3 vsX = ivec3(mapFragToVs(frag));
+    ivec3 vsX = ivec3(floor(mapFragToVs(frag)));
     int ix = vsX.x;
     int iy = vsX.y;
     int iz = vsX.z;
 
-    // Apply Neumann boundary conditions
-    ivec2 X_ip = mapVsToFrag(ivec3(min(ix+1, Nx-1), iy, iz));
-    ivec2 X_in = mapVsToFrag(ivec3(max(ix-1,    0), iy, iz));
-    ivec2 X_jp = mapVsToFrag(ivec3(ix, min(iy+1, Ny-1), iz));
-    ivec2 X_jn = mapVsToFrag(ivec3(ix, max(iy-1,    0), iz));
-    ivec2 X_kp = mapVsToFrag(ivec3(ix, iy, min(iz+1, Nz-1)));
-    ivec2 X_kn = mapVsToFrag(ivec3(ix, iy, max(iz-1,    0)));
+    // Apply Neumann boundary conditions at grid boundaries
+    ivec3 X_ip = ivec3(min(ix+1, Nx-1), iy, iz);
+    ivec3 X_in = ivec3(max(ix-1,    0), iy, iz);
+    ivec3 X_jp = ivec3(ix, min(iy+1, Ny-1), iz);
+    ivec3 X_jn = ivec3(ix, max(iy-1,    0), iz);
+    ivec3 X_kp = ivec3(ix, iy, min(iz+1, Nz-1));
+    ivec3 X_kn = ivec3(ix, iy, max(iz-1,    0));
 
     // Get air pressure, temperature and velocity divergence at voxel
-    float P    = texelFetch(Pair_sampler, frag, 0).x;
-    float T    = texelFetch(Tair_sampler, frag, 0).x;
-    float divv = texelFetch(divVair_sampler, frag, 0).x;
+    float P     = texelFetch(Pair_sampler, frag, 0).x;
+    float T     = texelFetch(Tair_sampler, frag, 0).x;
+    float div_v = texelFetch(divVair_sampler, frag, 0).x;
 
     // Introduce local expansion due to heated fluid
-    float phi = timestep * expansion * T;
-    divv -= phi;
+    div_v -= timestep * expansion * T;
 
     // Get pressure values at local stencil
-    float P_xp = texelFetch(Pair_sampler, X_ip, 0).r;
-    float P_xn = texelFetch(Pair_sampler, X_in, 0).r;
-    float P_yp = texelFetch(Pair_sampler, X_jp, 0).r;
-    float P_yn = texelFetch(Pair_sampler, X_jn, 0).r;
-    float P_zp = texelFetch(Pair_sampler, X_kp, 0).r;
-    float P_zn = texelFetch(Pair_sampler, X_kn, 0).r;
+    float P_xp = texelFetch(Pair_sampler, mapVsToFrag(X_ip), 0).r;
+    float P_xn = texelFetch(Pair_sampler, mapVsToFrag(X_in), 0).r;
+    float P_yp = texelFetch(Pair_sampler, mapVsToFrag(X_jp), 0).r;
+    float P_yn = texelFetch(Pair_sampler, mapVsToFrag(X_jn), 0).r;
+    float P_zp = texelFetch(Pair_sampler, mapVsToFrag(X_kp), 0).r;
+    float P_zn = texelFetch(Pair_sampler, mapVsToFrag(X_kn), 0).r;
+
+    // Apply pressure Neumann boundary-condition for solid cells:
+    if (isSolidCell(X_ip)) P_xp = P;
+    if (isSolidCell(X_in)) P_xn = P;
+    if (isSolidCell(X_jp)) P_yp = P;
+    if (isSolidCell(X_jn)) P_yn = P;
+    if (isSolidCell(X_kp)) P_zp = P;
+    if (isSolidCell(X_kn)) P_zn = P;
 
     // Thus compute Jacobi-relaxation solution of Poisson equation:
-    //   Laplacian[p] = Divergence[v] / timestep
-    float rhs = divv; // / timestep;
+    //   Laplacian[p] = Divergence[v]
     float avgp = (P_xp + P_xn + P_yp + P_yn + P_zp + P_zn) / 6.0;
 
-    // @todo: what is the "correct" normalization here?
-
-    float P_relax = avgp - dL*dL*rhs/6.0; // (See Numerical Recipes 19.5.5, extended to 3d)
-    //float P_relax = avgp - rhs/6.0; // (See Numerical Recipes 19.5.5, extended to 3d)
+    // For the pressure projection formula, see:
+    //  - "Fast Fluid Dynamics Simulation on the GPU", Harris
+    //  - "Real-Time Simulation and Rendering of 3D Fluids", Crane et. al
+    //  - Numerical Recipes 19.5.5, extended to 3d
+    float P_relax = avgp - dL*dL*div_v/6.0;
 
     Pair_output = vec4(P_relax);
 }
@@ -574,6 +542,7 @@ uniform int Nx;
 uniform int Ny;
 uniform int Nz;
 uniform int Ncol;
+uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
 uniform float dL;
 
 // Physics
@@ -612,40 +581,61 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     return ivec2(iu, iv);
 }
 
+bool isSolidCell(in ivec3 vsPi)
+{
+    // @todo: expose for generalization
+    vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
+    vec3 wsP = vsP*dL;
+    vec3 C = L/2.0;
+    float r = length(wsP - C);
+    return r <= (L.x/2.5);
+    //return vsPi.y<=1;
+}
+
 void main()
 {
     // Setup local stencil:
     ivec2 frag = ivec2(gl_FragCoord.xy);
-    ivec3 vsX = ivec3(mapFragToVs(frag));
+    ivec3 vsX = ivec3(floor(mapFragToVs(frag)));
     int ix = vsX.x;
     int iy = vsX.y;
     int iz = vsX.z;
 
-    // Apply Neumann boundary conditions
-    ivec2 X_ip = mapVsToFrag(ivec3(min(ix+1, Nx-1), iy, iz));
-    ivec2 X_in = mapVsToFrag(ivec3(max(ix-1,    0), iy, iz));
-    ivec2 X_jp = mapVsToFrag(ivec3(ix, min(iy+1, Ny-1), iz));
-    ivec2 X_jn = mapVsToFrag(ivec3(ix, max(iy-1,    0), iz));
-    ivec2 X_kp = mapVsToFrag(ivec3(ix, iy, min(iz+1, Nz-1)));
-    ivec2 X_kn = mapVsToFrag(ivec3(ix, iy, max(iz-1,    0)));
+    // Apply Neumann boundary conditions at grid boundaries
+    ivec3 X_ip = ivec3(min(ix+1, Nx-1), iy, iz);
+    ivec3 X_in = ivec3(max(ix-1,    0), iy, iz);
+    ivec3 X_jp = ivec3(ix, min(iy+1, Ny-1), iz);
+    ivec3 X_jn = ivec3(ix, max(iy-1,    0), iz);
+    ivec3 X_kp = ivec3(ix, iy, min(iz+1, Nz-1));
+    ivec3 X_kn = ivec3(ix, iy, max(iz-1,    0));
 
     // air velocity at voxel
     vec3 v = texelFetch(Vair_sampler, frag, 0).rgb;
 
-    // Compute local gradient of pressure field
-    float P_xp = texelFetch(Pair_sampler, X_ip, 0).r;
-    float P_xn = texelFetch(Pair_sampler, X_in, 0).r;
-    float P_yp = texelFetch(Pair_sampler, X_jp, 0).r;
-    float P_yn = texelFetch(Pair_sampler, X_jn, 0).r;
-    float P_zp = texelFetch(Pair_sampler, X_kp, 0).r;
-    float P_zn = texelFetch(Pair_sampler, X_kn, 0).r;
-    float dpdx = 0.5*(P_xp - P_xn)/dL;
-    float dpdy = 0.5*(P_yp - P_yn)/dL;
-    float dpdz = 0.5*(P_zp - P_zn)/dL;
-    vec3 gradp = vec3(dpdx, dpdy, dpdz);
+    // Get pressure values at local stencil
+    float  P   = texelFetch(Pair_sampler, frag, 0).r;
+    float P_xp = texelFetch(Pair_sampler, mapVsToFrag(X_ip), 0).r;
+    float P_xn = texelFetch(Pair_sampler, mapVsToFrag(X_in), 0).r;
+    float P_yp = texelFetch(Pair_sampler, mapVsToFrag(X_jp), 0).r;
+    float P_yn = texelFetch(Pair_sampler, mapVsToFrag(X_jn), 0).r;
+    float P_zp = texelFetch(Pair_sampler, mapVsToFrag(X_kp), 0).r;
+    float P_zn = texelFetch(Pair_sampler, mapVsToFrag(X_kn), 0).r;
 
-    // Update air velocity accordingly
-    Vair_output = vec4(v - timestep*gradp, 0.0);
+    // Apply pressure Neumann boundary-condition for solid cells:
+    vec3 vMask = vec3(1.0, 1.0, 1.0);
+    if (isSolidCell(X_ip)) { P_xp = P; vMask.x = 0.0; }
+    if (isSolidCell(X_in)) { P_xn = P; vMask.x = 0.0; }
+    if (isSolidCell(X_jp)) { P_yp = P; vMask.y = 0.0; }
+    if (isSolidCell(X_jn)) { P_yn = P; vMask.y = 0.0; }
+    if (isSolidCell(X_kp)) { P_zp = P; vMask.z = 0.0; }
+    if (isSolidCell(X_kn)) { P_zn = P; vMask.z = 0.0; }
+
+    // Update air velocity accordingly (see "Real-Time Simulation and Rendering of 3D Fluids", Crane et. al)
+    vec3 gradp = 0.5*vec3(P_xp - P_xn, P_yp - P_yn, P_zp - P_zn)/dL;
+    vec3 vnew = v - gradp;
+    vnew = vMask*vnew;
+
+    Vair_output = vec4(vnew, 0.0);
 }
 `,
 
@@ -685,6 +675,7 @@ uniform int Nz;
 uniform int Ncol;
 uniform int W;
 uniform int H;
+uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
 uniform float dL;
 uniform int Nraymarch;
 
@@ -786,6 +777,12 @@ vec4 interp(in sampler2D S, in vec3 wsP)
     return flo*Slo + fhi*Shi;
 }
 
+vec3 clampToBounds(in vec3 wsX)
+{
+    vec3 halfVoxel = vec3(dL);
+    return clamp(wsX, halfVoxel, L-halfVoxel);
+}
+
 ivec2 mapVsToFrag(in ivec3 vsP)
 {
     // map integer voxel space coords to the corresponding fragment coords
@@ -821,7 +818,7 @@ void main()
             vec3 wsP = pMarch - volMin;
 
             // Absorption by dust
-            vec3 debris = interp(debris_sampler, wsP).rgb;
+            vec3 debris = interp(debris_sampler, clampToBounds(wsP)).rgb;
             vec3 sigma = debrisExtinction * debris;
             Tr.r *= exp(-sigma.r*dl);
             Tr.g *= exp(-sigma.g*dl);
