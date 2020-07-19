@@ -35,6 +35,51 @@ layout(location = 1) out vec4 Pair_output;
 layout(location = 2) out vec4 Tair_output;
 layout(location = 3) out vec4 debris_output;
 
+///////////////////////////////////////////////////////////////////////////////////
+// user code
+///////////////////////////////////////////////////////////////////////////////////
+
+struct LocalData
+{
+    vec3 v;       // velocity
+    float P;      // pressure
+    float T;      // temperature
+    float debris; // debris density
+};
+
+bool isSolid(in vec3 wsP, // world space point of current voxel
+             in vec3 L)   // world-space extents of grid (also the upper right corner in world spa
+{
+    // define regions which are solid (static) obstacles
+    vec3 C = L/2.0;
+    float r = length(wsP - C);
+    return r <= L.x/2.5;
+}
+
+float thermalEffects(in vec3 wsP,             // world space point of current voxel
+                     in LocalData local_data, // local quantities of current voxel
+                     in vec3 L)               // world-space extents of grid (also the upper right corner in world space)
+{
+    // @todo: Tambient and radiationLoss will be defined in user code:
+    //      T0        = reference temperature for buoyancy
+    //      Tambient  = temperature which generates buoyancy which balances gravity
+    // Apply thermal relaxation to ambient temperature due to "radiation loss"
+    float dT = local_data.T - Tambient;
+    return Tambient + dT*exp(-radiationLoss);
+}
+
+vec3 externalForces(in vec3 wsP,             // world space point of current voxel
+                    in LocalData local_data, // local quantities of current voxel
+                    in vec3 L)               // world-space extents of grid (also the upper right corner in world space)
+{
+    // @todo: gravity, buoyancy and T0 will be defined in user code
+    float buoyancy_force = -gravity + gravity*buoyancy*(local_data.T - T0);
+    return vec3(0.0, buoyancy_force, 0.0);
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+
+
 vec3 mapFragToVs(in ivec2 frag)
 {
     // map fragment coord in [W, H] to continuous position of corresponding voxel center in voxel space
@@ -90,7 +135,7 @@ vec4 interp(in sampler2D S, in vec3 wsP)
 
 vec3 clampToBounds(in vec3 wsX)
 {
-    vec3 halfVoxel = vec3(dL);
+    vec3 halfVoxel = vec3(0.5*dL);
     return clamp(wsX, halfVoxel, L-halfVoxel);
 }
 
@@ -103,53 +148,6 @@ vec3 back_advect(in vec3 wsX, in vec3 vX, float h)
     vec3 k4 = interp(Vair_sampler, clampToBounds(wsX -     h*k3)).xyz;
     return clampToBounds(wsX - h*(k1 + 2.0*k2 + 2.0*k3 + k4)/6.0);
 }
-
-
-///////////////////////////////////////////////////////////////////////////////////
-// user code
-///////////////////////////////////////////////////////////////////////////////////
-
-struct LocalData
-{
-    vec3 v;       // velocity
-    float P;      // pressure
-    float T;      // temperature
-    float debris; // debris density
-};
-
-bool isSolid(in vec3 wsP, // world space point of current voxel
-             in vec3 L)   // world-space extents of grid (also the upper right corner in world spa
-{
-    // define regions which are solid (static) obstacles
-    vec3 C = L/2.0;
-    float r = length(wsP - C);
-    return r <= L.x/2.5;
-}
-
-float thermalEffects(in vec3 wsP,             // world space point of current voxel
-                     in LocalData local_data, // local quantities of current voxel
-                     in vec3 L)               // world-space extents of grid (also the upper right corner in world space)
-{
-    // @todo: Tambient and radiationLoss will be defined in user code:
-    //      T0        = reference temperature for buoyancy
-    //      Tambient  = temperature which generates buoyancy which balances gravity
-    // Apply thermal relaxation to ambient temperature due to "radiation loss"
-    float dT = local_data.T - Tambient;
-    return Tambient + dT*exp(-radiationLoss);
-}
-
-vec3 externalForces(in vec3 wsP,             // world space point of current voxel
-                    in LocalData local_data, // local quantities of current voxel
-                    in vec3 L)               // world-space extents of grid (also the upper right corner in world space)
-{
-    // @todo: gravity, buoyancy and T0 will be defined in user code
-    float buoyancy_force = -gravity + gravity*buoyancy*(local_data.T - T0);
-    return vec3(0.0, buoyancy_force, 0.0);
-}
-
-///////////////////////////////////////////////////////////////////////////////////
-
-
 
 vec3 vorticityConfinementForce(ivec2 frag, in ivec3 vsXi)
 {

@@ -126,7 +126,7 @@ vec4 interp(in sampler2D S, in vec3 wsP)
 
 vec3 clampToBounds(in vec3 wsX)
 {
-    vec3 halfVoxel = vec3(dL);
+    vec3 halfVoxel = vec3(0.5*dL);
     return clamp(wsX, halfVoxel, L-halfVoxel);
 }
 
@@ -172,7 +172,7 @@ void main()
             Tr.b *= exp(-sigma.b*dl);
 
             // Emit blackbody radiation from hot air
-            float T = interp(Tair_sampler, wsP).r;
+            float T = interp(Tair_sampler, clampToBounds(wsP)).r;
 
             vec3 blackbody_color = tempToRGB(T * TtoKelvin);
             vec3 emission = pow(blackbodyEmission*T, 4.0) * blackbody_color * Tr;
