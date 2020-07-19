@@ -107,20 +107,23 @@ GUI.prototype.createSimulationSettings = function()
 
     this.simulationFolder = this.gui.addFolder('Simulation');
     
-	this.simulationFolder.add(solver, 'Nx', 32, 512).onChange( function(Nx) { solver.resize(Math.floor(Nx), solver.Ny, solver.Nz); } );
-	this.simulationFolder.add(solver, 'Ny', 32, 512).onChange( function(Ny) { solver.resize(solver.Nx, Math.floor(Ny), solver.Nz); } );
-	this.simulationFolder.add(solver, 'Nz', 32, 512).onChange( function(Nz) { solver.resize(solver.Nx, solver.Ny, Math.floor(Nz)); } );
-	this.simulationFolder.add(solver, 'NprojSteps', 1, 256).onChange( function(NprojSteps) { solver.NprojSteps = NprojSteps; solver.reset(); } );
+    this.simulationFolder.add(solver, 'Nx', 32, 512).onChange( function(Nx) { solver.resize(Math.floor(Nx), solver.Ny, solver.Nz); } );
+    this.simulationFolder.add(solver, 'Ny', 32, 512).onChange( function(Ny) { solver.resize(solver.Nx, Math.floor(Ny), solver.Nz); } );
+    this.simulationFolder.add(solver, 'Nz', 32, 512).onChange( function(Nz) { solver.resize(solver.Nx, solver.Ny, Math.floor(Nz)); } );
+    this.simulationFolder.add(solver, 'NprojSteps', 1, 256).onChange( function(NprojSteps) { solver.NprojSteps = NprojSteps; solver.reset(); } );
     this.simulationFolder.add(solver, 'timestep', 0.0, 10.0).onChange( function() { solver.reset(); } );
+	this.simulationFolder.add(solver, 'vorticity_scale', 0.0, 0.99).onChange( function() { solver.reset(); } );
+	
+	// @todo: move to user code
     this.simulationFolder.add(solver, 'blastHeight', 0.0, 1.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'blastRadius', 0.0, 1.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'blastTemperature', 0.0, 100000.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'blastVelocity', 0.0, 1000.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'debrisHeight', 0.0, 1.0).onChange( function() { solver.reset(); } );
-	this.simulationFolder.add(solver, 'debrisFalloff', 0.0, 1.0).onChange( function() { solver.reset(); } );
-	this.simulationFolder.add(solver, 'gravity', 0.0, 1.0).onChange( function() { solver.reset(); } );
-	this.simulationFolder.add(solver, 'T0', 0.0, 1000.0).onChange( function() { solver.reset(); } );
-	this.simulationFolder.add(solver, 'Tambient', 0.0, 1000.0).onChange( function() { solver.reset(); } );
+    this.simulationFolder.add(solver, 'debrisFalloff', 0.0, 1.0).onChange( function() { solver.reset(); } );
+    this.simulationFolder.add(solver, 'gravity', 0.0, 1.0).onChange( function() { solver.reset(); } );
+    this.simulationFolder.add(solver, 'T0', 0.0, 1000.0).onChange( function() { solver.reset(); } );
+    this.simulationFolder.add(solver, 'Tambient', 0.0, 1000.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'buoyancy', 0.0, 1.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'expansion', 0.0, 1.0).onChange( function() { solver.reset(); } );
     this.simulationFolder.add(solver, 'radiationLoss', 0.0, 1.0).onChange( function() { solver.reset(); } );

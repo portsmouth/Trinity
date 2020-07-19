@@ -47,15 +47,20 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     return ivec2(iu, iv);
 }
 
-bool isSolidCell(in ivec3 vsPi)
+bool isSolid(in vec3 wsP, // world space point of current voxel
+             in vec3 L)   // world-space extents of grid (also the upper right corner in world spa
 {
-    // @todo: expose for generalization
-    vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
-    vec3 wsP = vsP*dL;
+    // define regions which are solid (static) obstacles
     vec3 C = L/2.0;
     float r = length(wsP - C);
-    return r <= (L.x/2.5);
-    //return vsPi.y<=1;
+    return r <= L.x/2.5;
+}
+
+bool isSolidCell(in ivec3 vsPi)
+{
+    vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
+    vec3 wsP = vsP*dL;
+    return isSolid(wsP, L);
 }
 
 void main()

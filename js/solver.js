@@ -11,7 +11,8 @@ var Solver = function()
         'project'        : {'v': 'project-vertex-shader',      'f': 'project-fragment-shader'      },
         'copy'           : {'v': 'copy-vertex-shader',         'f': 'copy-fragment-shader'         },
         'update'         : {'v': 'update-vertex-shader',       'f': 'update-fragment-shader'       },
-        'debris'         : {'v': 'debris-vertex-shader',       'f': 'debris-fragment-shader'       }
+        'debris'         : {'v': 'debris-vertex-shader',       'f': 'debris-fragment-shader'       },
+        'vorticity'      : {'v': 'vorticity-vertex-shader',    'f': 'vorticity-fragment-shader'    }
     });
 
     this.fbo = new GLU.RenderTarget();
@@ -21,6 +22,9 @@ var Solver = function()
     // Defaults
     this.timestep = 2.0;
     this.NprojSteps = 16;
+    this.vorticity_scale = 0.5;
+
+    // @todo: all these will be defined in user code:
     this.blastHeight = 0.1;
     this.blastRadius = 0.15;
     this.blastTemperature = 500.0;   // initial temperature of fireball relative to ambient
@@ -45,6 +49,7 @@ Solver.prototype.compileShaders = function()
     this.div_program          = new GLU.Shader('div',           this.shaderSources, null);
     this.copy_program         = new GLU.Shader('copy',          this.shaderSources, null);
     this.update_program       = new GLU.Shader('update',        this.shaderSources, null);
+    this.vorticity_program    = new GLU.Shader('vorticity',     this.shaderSources, null);
 }
 
 Solver.prototype.resize = function(Nx, Ny, Nz)
@@ -130,6 +135,7 @@ Solver.prototype.initialize = function()
     let Pair0    = new Float32Array(W*H*4);  // air pressure field
     let Tair0    = new Float32Array(W*H*4);  // air temperature field
     let debris0  = new Float32Array(W*H*4);  // debris extinction field
+    let vorticity = new Float32Array(W*H*4);  // vorticity field
 
     let dL = 1.0; // voxel size in world units
     this.dL = dL;
@@ -172,6 +178,9 @@ Solver.prototype.initialize = function()
                 divVair0[b] = 0.0;
                 Pair0[b]    = 0.0;
                 Tair0[b]    = T;
+                vorticity[b+0]  = 0.0;
+                vorticity[b+1]  = 0.0;
+                vorticity[b+2]  = 0.0;
 
                 // Initialize debris density field
                 let density = y < this.debrisHeight*L[1] ? Math.exp(-3.0*this.debrisFalloff*y/(this.debrisHeight*L[1])) : 0.0;
@@ -201,7 +210,10 @@ Solver.prototype.initialize = function()
     this.debris = [ new GLU.Texture(W, H, 4, true, true, true, debris0),
                     new GLU.Texture(W, H, 4, true, true, true, debris0) ];
 
+    this.vorticity = new GLU.Texture(W, H, 4, true, true, true, vorticity);
+
     this.frame = 0;
+    this.time = 0.0;
 
     this.domain = { Nx: Nx,
                     Ny: Ny,
@@ -263,6 +275,29 @@ Solver.prototype.step = function()
     gl.viewport(0, 0, this.W, this.H);
     this.quadVbo.bind();
 
+    // Compute vorticity
+    // @todo (only if vorticity confinement enabled)
+    {
+        this.vorticity_program.bind();
+        this.vorticity_program.uniformI("Nx",             this.domain.Nx);
+        this.vorticity_program.uniformI("Ny",             this.domain.Ny);
+        this.vorticity_program.uniformI("Nz",             this.domain.Nz);
+        this.vorticity_program.uniformI("Ncol",           this.domain.Ncol);
+        this.vorticity_program.uniformI("W",              this.domain.W);
+        this.vorticity_program.uniformI("H",              this.domain.H);
+        this.vorticity_program.uniform3Fv("L",            this.domain.L);
+        this.vorticity_program.uniformF("dL",             this.domain.dL);
+
+        this.fbo.bind();
+        this.fbo.drawBuffers(1);
+        this.fbo.attachTexture(this.vorticity, 0);        // write to vorticity
+        this.Vair[0].bind(0);                             // read from Vair[0]
+        this.vorticity_program.uniformTexture("Vair_sampler", this.Vair[0]);
+        this.quadVbo.draw(this.update_program, gl.TRIANGLE_FAN);
+        this.fbo.detachTexture(0);
+        this.fbo.unbind();
+    }
+
     // Run air/debris force-advection step, writing 0 -> 1
     {
         this.advect_program.bind();
@@ -274,7 +309,10 @@ Solver.prototype.step = function()
         this.advect_program.uniformI("H",              this.domain.H);
         this.advect_program.uniform3Fv("L",            this.domain.L);
         this.advect_program.uniformF("dL",             this.domain.dL);
-        this.advect_program.uniformF("timestep",      this.timestep);
+        this.advect_program.uniformF("time",           this.time);
+
+        this.advect_program.uniformF("timestep",        this.timestep);
+        this.advect_program.uniformF("vorticity_scale", this.vorticity_scale);
         this.advect_program.uniformF("buoyancy",      this.buoyancy);
         this.advect_program.uniformF("gravity",       this.gravity);
         this.advect_program.uniformF("radiationLoss", this.radiationLoss * 1.0e-2);
@@ -292,10 +330,13 @@ Solver.prototype.step = function()
         this.Pair[0].bind(1);                    // read from Pair[0]
         this.Tair[0].bind(2);                    // read from Tair[0]
         this.debris[0].bind(3);                  // read from debris[0]
+        this.vorticity.bind(4);                  // read from vorticity
+
         this.advect_program.uniformTexture("Vair_sampler", this.Vair[0]);
         this.advect_program.uniformTexture("Pair_sampler", this.Pair[0]);
         this.advect_program.uniformTexture("Tair_sampler", this.Tair[0]);
         this.advect_program.uniformTexture("debris_sampler", this.debris[0]);
+        this.advect_program.uniformTexture("vorticity_sampler", this.vorticity);
         this.quadVbo.draw(this.advect_program, gl.TRIANGLE_FAN);
         this.fbo.detachTexture(0);
         this.fbo.detachTexture(1);
@@ -449,4 +490,5 @@ Solver.prototype.step = function()
     */
 
     this.frame++;
+    this.time += this.timestep;
 }
