@@ -247,7 +247,7 @@ function onLoad()
     // setup CodeMirror events
     var cmEl = document.querySelector('.CodeMirror');
     cmEl.addEventListener('mouseenter', function(e) {
-        trinity.camControls.enabled = false;
+        trinity.getCameraControls().enabled = false;
         trinity.editing = true;
     });
     cmEl.addEventListener('mousemove', function(e) {
@@ -255,25 +255,25 @@ function onLoad()
         if (e.clientX >= edRect.left && e.clientX <= edRect.right &&
             e.clientY >= edRect.top  && e.clientY <= edRect.bottom)
         {
-            trinity.camControls.enabled = false;
+            trinity.getCameraControls().enabled = false;
             trinity.editing = true;
             return;
         }
         trinity.editing = false;
-        trinity.camControls.enabled = true;
+        trinity.getCameraControls().enabled = true;
     });
     cmEl.addEventListener('mouseleave', function(e) {
-        trinity.camControls.enabled = true;
+        trinity.getCameraControls().enabled = true;
         trinity.editing = false;
     });
     cmEl.addEventListener('keydown', function(e) {
         if (trinity.editing)
         {
-            trinity.camControls.enabled = false;
+            trinity.getCameraControls().enabled = false;
         }
         else
         {
-            trinity.camControls.enabled = true;
+            trinity.getCameraControls().enabled = true;
             e.codemirrorIgnore = true;
             e.preventDefault();
         }

@@ -104,6 +104,14 @@ Renderer.prototype.resize = function(width, height)
     this.quadVbo = this.createQuadVbo();
 }
 
+Renderer.prototype.setBounds = function(domain)
+{
+    let o = domain.boundsMin;
+    let c = domain.boundsMax;
+    let extents = [c[0]-o[0], c[1]-o[1], c[2]-o[2]];
+    this.boxVbo = this.createBoxVbo(o, extents)
+}
+
 Renderer.prototype.compileShaders = function()
 {
     if (this.compiled_successfully)
@@ -208,14 +216,6 @@ Renderer.prototype.render = function(solver)
         var modelViewMatrix = matrixWorldInverse.toArray();
         var modelViewMatrixLocation = this.lineProgram.getUniformLocation("u_modelViewMatrix");
         gl.uniformMatrix4fv(modelViewMatrixLocation, false, modelViewMatrix);
-
-        if (!this.boxVbo)
-        {
-            let o = domain.boundsMin;
-            let c = domain.boundsMax;
-            let extents = [c[0]-o[0], c[1]-o[1], c[2]-o[2]];
-            this.boxVbo = this.createBoxVbo(o, extents)
-        }
 
         this.boxVbo.bind();
         this.boxVbo.draw(this.lineProgram, gl.LINES);

@@ -89,15 +89,15 @@ GUI.prototype.createguiSettings = function()
 
 GUI.prototype.createRendererSettings = function()
 {
-	this.rendererFolder = this.gui.addFolder('Raymarcher');
-	var renderer = trinity.getRenderer();
-	var camera = trinity.getCamera();
+    this.rendererFolder = this.gui.addFolder('Raymarcher');
+    var renderer = trinity.getRenderer();
+    var camera = trinity.getCamera();
 
-	this.rendererFolder.add(renderer.settings, 'exposure', -10.0, 10.0);
-	this.rendererFolder.add(renderer.settings, 'gamma', 1.0, 3.0);
+    this.rendererFolder.add(renderer.settings, 'exposure', -10.0, 10.0);
+    this.rendererFolder.add(renderer.settings, 'gamma', 1.0, 3.0);
     this.rendererFolder.add(renderer.settings, 'debrisExtinction', 0.0, 100.0);
-	this.rendererFolder.add(renderer.settings, 'blackbodyEmission', -20.0, 20.0);
-	this.rendererFolder.add(renderer.settings, 'TtoKelvin', 0.0, 10.0);
+    this.rendererFolder.add(renderer.settings, 'blackbodyEmission', -20.0, 20.0);
+    this.rendererFolder.add(renderer.settings, 'TtoKelvin', 0.0, 10.0);
 
 	this.rendererFolder.close();
 }
@@ -108,14 +108,18 @@ GUI.prototype.createSimulationSettings = function()
 
     this.simulationFolder = this.gui.addFolder('Simulation');
 
-    this.simulationFolder.add(solver.settings, 'Nx', 32, 512).onChange(                function(Nx) { solver.resize(Math.floor(Nx), solver.settings.Ny, solver.settings.Nz); } );
-    this.simulationFolder.add(solver.settings, 'Ny', 32, 512).onChange(                function(Ny) { solver.resize(solver.settings.Nx, Math.floor(Ny), solver.settings.Nz); } );
-    this.simulationFolder.add(solver.settings, 'Nz', 32, 512).onChange(                function(Nz) { solver.resize(solver.settings.Nx, solver.settings.Ny, Math.floor(Nz)); } );
+    this.simulationFolder.Nx = solver.settings.Nx;
+    this.simulationFolder.Ny = solver.settings.Ny;
+    this.simulationFolder.Nz = solver.settings.Nz;
+
+    this.simulationFolder.add(this.simulationFolder, 'Nx', 32, 512).onChange(                function(Nx) { solver.resize(Math.floor(Nx), solver.settings.Ny, solver.settings.Nz); } );
+    this.simulationFolder.add(this.simulationFolder, 'Ny', 32, 512).onChange(                function(Ny) { solver.resize(solver.settings.Nx, Math.floor(Ny), solver.settings.Nz); } );
+    this.simulationFolder.add(this.simulationFolder, 'Nz', 32, 512).onChange(                function(Nz) { solver.resize(solver.settings.Nx, solver.settings.Ny, Math.floor(Nz)); } );
     this.simulationFolder.add(solver.settings, 'NprojSteps', 1, 256).onChange(         function(NprojSteps) { solver.NprojSteps = NprojSteps; solver.restart(); } );
     this.simulationFolder.add(solver.settings, 'timestep', 0.0, 10.0).onChange(        function() { solver.restart(); } );
-	this.simulationFolder.add(solver.settings, 'vorticity_scale', 0.0, 0.99).onChange( function() { solver.restart(); } );
+    this.simulationFolder.add(solver.settings, 'vorticity_scale', 0.0, 0.99).onChange( function() { solver.restart(); } );
 
-	// @todo: move to user code
+    // @todo: move to user code
     this.simulationFolder.add(solver, 'blastHeight', 0.0, 1.0).onChange(           function() { solver.restart(); } );
     this.simulationFolder.add(solver, 'blastRadius', 0.0, 1.0).onChange(           function() { solver.restart(); } );
     this.simulationFolder.add(solver, 'blastTemperature', 0.0, 100000.0).onChange( function() { solver.restart(); } );

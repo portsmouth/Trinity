@@ -193,6 +193,8 @@ Solver.prototype.resize = function(Nx, Ny, Nz)
 
     this.frame = 0;
     this.time = 0.0;
+
+    trinity.getRenderer().setBounds(this.domain);
 }
 
 

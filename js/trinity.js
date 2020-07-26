@@ -65,11 +65,11 @@ var Trinity = function(editor, error_editor)
     this.gui = null;
     this.guiVisible = true;
 
-    // Instantiate solver
-    this.solver = new Solver();
-
     // Instantiate renderer
     this.renderer = new Renderer();
+
+    // Instantiate solver
+    this.solver = new Solver();
 
     // Field presets
     this.presets = new Presets();
@@ -113,20 +113,6 @@ Trinity.prototype.getVersion = function()
     return [1, 0, 0];
 }
 
-Trinity.prototype.handleEvent = function(event)
-{
-    switch (event.type)
-    {
-        case 'resize':      this.resize();  break;
-        case 'mousemove':   this.onDocumentMouseMove(event);  break;
-        case 'mousedown':   this.onDocumentMouseDown(event);  break;
-        case 'mouseup':     this.onDocumentMouseUp(event);    break;
-        case 'contextmenu': this.onDocumentRightClick(event); break;
-        case 'click':       this.onClick(event);  break;
-        case 'keydown':     this.onkeydown(event);  break;
-    }
-}
-
 /**
 * Access to the GUI object
 *  @returns {GUI}
@@ -146,12 +132,6 @@ Trinity.prototype.getSolver = function()
     return this.solver;
 }
 
-Trinity.prototype.getSimulation = function()
-{
-    return this.simulation;
-}
-
-
 /**
 * Access to the camera object
 * @returns {THREE.PerspectiveCamera}.
@@ -165,7 +145,7 @@ Trinity.prototype.getCamera = function()
 * Access to the camera controller object
 * @returns {THREE.OrbitControls}
 */
-Trinity.prototype.getControls = function()
+Trinity.prototype.getCameraControls = function()
 {
     return this.camControls;
 }
@@ -178,7 +158,6 @@ Trinity.prototype.getGLContext = function()
     return GLU.gl;
 }
 
-
 /**
 * Programmatically show or hide the dat.GUI UI
 * @param {Boolean} show - toggle
@@ -188,6 +167,25 @@ Trinity.prototype.showGUI = function(show)
     this.guiVisible = show;
 }
 
+
+///////////////////////////////////////////////////////////////
+// Camera logic
+///////////////////////////////////////////////////////////////
+
+Trinity.prototype.resetCam = function()
+{
+    let domain = this.getSolver().getDomain();
+    let min     = domain.boundsMin;
+    let max     = domain.boundsMax;
+    let center  = domain.boundsCenter;
+    let extents = [    (max[0]-min[0]),     (max[1]-min[1]),     (max[2]-min[2])];
+    let relDist = [1.0, 0.666, 5.0];
+    this.camera.position.set(center[0]+relDist[0]*extents[0], 
+                             center[1]+relDist[1]*extents[1], 
+                             center[2]+relDist[2]*extents[2]);
+    this.camControls.target.set(center[0], center[1], center[2]);
+    this.camControls.update();
+}
 
 
 ///////////////////////////////////////////////////////////////
@@ -310,18 +308,6 @@ Trinity.prototype.load_state = function(state)
     // Load solver state
     this.solver.settings = Object.assign(this.solver.settings, state.S);
 
-    // Initialize camera
-    let domain = this.solver.getDomain();
-    let min     = domain.boundsMin;
-    let max     = domain.boundsMax;
-    let center  = domain.boundsCenter;
-    let extents = [    (max[0]-min[0]),     (max[1]-min[1]),     (max[2]-min[2])];
-    let relDist = [1.5, 0.75, 1.3];
-    this.camera.position.set(center[0]+relDist[0]*extents[0], 
-                             center[1]+relDist[1]*extents[1], 
-                             center[2]+relDist[2]*extents[2]);
-    this.camControls.target.set(center[0], center[1], center[2]);
-
     // Sync logic
     this.camControls.update();
     this.gui.refresh();
@@ -419,6 +405,13 @@ Trinity.prototype.step = function()
     this.renderer.render(this.solver);
 }
 
+
+
+
+///////////////////////////////////////////////////////////////
+// Window resize logic
+///////////////////////////////////////////////////////////////
+
 Trinity.prototype._resize = function(width, height)
 {
     this.width = width;
@@ -448,6 +441,21 @@ Trinity.prototype.resize = function()
     let width = window.innerWidth;
     let height = window.innerHeight;
     this._resize(width, height);
+}
+
+
+Trinity.prototype.handleEvent = function(event)
+{
+    switch (event.type)
+    {
+        case 'resize':      this.resize();  break;
+        case 'mousemove':   this.onDocumentMouseMove(event);  break;
+        case 'mousedown':   this.onDocumentMouseDown(event);  break;
+        case 'mouseup':     this.onDocumentMouseUp(event);    break;
+        case 'contextmenu': this.onDocumentRightClick(event); break;
+        case 'click':       this.onClick(event);  break;
+        case 'keydown':     this.onkeydown(event);  break;
+    }
 }
 
 Trinity.prototype.onClick = function(event)
@@ -517,6 +525,11 @@ Trinity.prototype.onkeydown = function(event)
             let objJsonStr = this.get_escaped_stringified_state(state);
             console.log(objJsonStr);
             break;
+
+        case 70: // F key: move cam to standard orientation
+            this.resetCam();
+            break;
+
 
         case 32: // space bar: pause toggle
             this.pauseSimToggle();
