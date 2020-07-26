@@ -7,26 +7,44 @@
  */
 var GLU = {};
 
+var gl;
+
 (function() {
 
     ///////////////////////////////////////////////////
     // GLU namespace functions
     ///////////////////////////////////////////////////
 
-    this.setupGL = function()
+    this.setupGL = function(canvas)
     {
+        this.canvas = canvas;
+        let _gl;
         try 
         {
-            var gl = this.canvas.getContext("webgl2", {preserveDrawingBuffer: true});
-        } catch (e) {}
-        if (!gl) this.fail("Could not initialise WebGL 2");
-        this.gl = gl;
+            _gl = this.canvas.getContext("webgl2", {preserveDrawingBuffer: true, antialias: true});
+        } catch (e) {
+            this.fail(e.message + ". This can't run in your browser.");
+        }
+        if (!_gl) this.fail("Could not initialise WebGL");
+        this.gl = _gl;
+        gl = _gl;
 
-        this.floatBufExt = gl.getExtension("EXT_color_buffer_float");
-        this.floatLinExt = gl.getExtension("OES_texture_float_linear");
-        if (!this.floatBufExt || !this.floatLinExt) this.fail("Your platform does not support float textures");
-        
-        console.log('Supported webGL extensions: ' + gl.getSupportedExtensions());
+        //console.log('Supported webGL extensions: ' + gl.getSupportedExtensions());
+        if (gl.getSupportedExtensions().indexOf("EXT_frag_depth") >= 0)
+        {
+            this.depthExt = gl.getExtension("EXT_frag_depth");
+            if (!this.depthExt) this.fail("Your platform does not support EXT_frag_depth");
+        }
+        if (gl.getSupportedExtensions().indexOf("EXT_color_buffer_float") >= 0)
+        {
+            this.floatBufExt = gl.getExtension("EXT_color_buffer_float");
+            if (!this.floatBufExt) this.fail("Your platform does not support EXT_color_buffer_float");
+        }
+        if (gl.getSupportedExtensions().indexOf("OES_texture_float_linear") >= 0)
+        {
+            this.floatLinExt = gl.getExtension("OES_texture_float_linear");
+            if (!this.floatLinExt) this.fail("Your platform does not support OES_texture_float_linear");
+        }
     }
 
     this.glTypeSize = function(type) 
@@ -48,103 +66,47 @@ var GLU = {};
         }
     }
 
-    function addLineNumbers(string, fs) {
-        var lines = string.split( '\n' );
-        for ( var i = 0; i < lines.length; i ++ ) {
-            let num = i+1;
-            lines[ i ] = num.toString().fontcolor("blue").bold() + ': ' + lines[ i ];
-        }
-        return lines.join( '\t\n' ).fontsize(fs);
-    }
-
     // We assume here a global Shaders object has been defined, which
     // maps names like foo-vertex-shader, foo-fragment-shader to the respective code for shader name foo.
-    this.resolveShaderSource = function(shaderDescriptors)
+    this.resolveShaderSource = function(shader_names)
     {
-        let shaderSources = {};
-
-        for (let name in shaderDescriptors) 
+        var shaderSources = {};
+        for (var i=0; i<shader_names.length; i++)
         {
-            let shader_files = shaderDescriptors[name];
-            let vertex_shader_file = shader_files.v;
-            shaderSources[name] = {}
-            shaderSources[name].v = Shaders[vertex_shader_file]
-
-            let fragment_shader_files = shader_files.f;
-            if (fragment_shader_files instanceof Array)
+            var name = shader_names[i];
+            shaderSources[name] =
             {
-                shaderSources[name].f = []
-                for (let i=0; i<fragment_shader_files.length; i++)
-                {
-                    let fs_file = fragment_shader_files[i];
-                    let fs_source = Shaders[fs_file];
-                    shaderSources[name].f.push(fs_source);
-                }
-            }
-            else
-            {
-                let fs_source = Shaders[fragment_shader_files];
-                shaderSources[name].f = fs_source;
-            }
+                'v': Shaders[name+'-vertex-shader'],
+                'f': Shaders[name+'-fragment-shader']
+            };
         }
         return shaderSources;
     }
 
-    this.createProgram = function(vertexShader, fragmentShaders, vertSource, fragSource)
+    this.createProgram = function(vertexShader, fragmentShader) 
     {
-        // Here fragmentShaders is either a single shader, or an array of shaders to link
-
         // create a program.
         var program = gl.createProgram();
 
         // attach the shaders.
         gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
 
-        if (fragmentShaders instanceof Array)
-        {
-            for (let i=0; i<fragmentShaders.length; i++)
-            {
-                let fragmentShader = fragmentShaders[i];
-                gl.attachShader(program, fragmentShader);
-            }
-        }
-        else
-        {
-            gl.attachShader(program, fragmentShaders);
-        }
-        
         // link the program.
         gl.linkProgram(program);
 
         // Check if it linked.
         var success = gl.getProgramParameter(program, gl.LINK_STATUS);
-        if (!success)
+        if (!success) 
         {
             // something went wrong with the link
-            let errMsg = "Program failed to link: ".bold().fontcolor("red") + gl.getProgramInfoLog(program) +
-            "\n" + gl.getShaderInfoLog(fragmentShader) +
-            "\n" + gl.getShaderInfoLog(vertexShader)
-
-            errMsg += "\n\nProblematic shaders:\n\nVERTEX_SHADER:\n".bold().fontcolor("red") + addLineNumbers(vertSource)
-                    +"\n\nFRAGMENT_SHADER:\n".bold().fontcolor("red") + addLineNumbers(fragSource, 2);
-                    
-            this.fail(errMsg);
+            trinity.link_error(gl.getProgramInfoLog(program),
+                             gl.getShaderInfoLog(fragmentShader) + 
+                             gl.getShaderInfoLog(vertexShader));
+            program = null;
         }
 
         return program;
-    }
-
-    this.applyShaderReplacements = function(source, replacements)
-    {
-        let source_ = (' ' + source).slice(1);
-        for (var pattern in replacements)
-        {
-            if (replacements.hasOwnProperty(pattern))
-            {
-                source_ = source_.replace(new RegExp(pattern, 'g'), replacements[pattern]);
-            }
-        }
-        return source_;
     }
 
     this.compileShaderSource = function(shaderName, shaderSource, shaderType)
@@ -153,16 +115,12 @@ var GLU = {};
         gl.shaderSource(shader, shaderSource); // Set the shader source code.
         gl.compileShader(shader);              // Compile the shader
         var success = gl.getShaderParameter(shader, gl.COMPILE_STATUS); // Check if it compiled
-        if (!success)
+        if (!success) 
         {
             // Something went wrong during compilation; get the error
             var shaderTypeStr = (shaderType==gl.VERTEX_SHADER) ? 'vertex' : 'fragment';
-            let errMsg = "Could not compile ".bold() + shaderName.bold() + " " + shaderTypeStr.bold() + " shader: \n\n".bold();
-            let glErr = gl.getShaderInfoLog(shader).bold().fontcolor("red");
-            glErr = glErr.replace(/^/gm, "\t");
-            errMsg += glErr;
-            errMsg += "\nProblematic shader:\n\n" + addLineNumbers(shaderSource, 2);
-            this.fail(errMsg);
+            trinity.compile_error(shaderName, shaderTypeStr, gl.getShaderInfoLog(shader));
+            return null;
         }
         return shader;
     }
@@ -179,52 +137,38 @@ var GLU = {};
     */
     this.Shader = function(name, shaderSources, replacements)
     {
-        let shader_sources = shaderSources[name];
-        let vertSource = shader_sources.v;
-        let fragSource = shader_sources.f; // could be an array
+        shaderSource = shaderSources[name];
 
-        // Apply any string replacements to all sources
+        // replacements is an optional object whose key-val pairs
+        // define patterns to replace in the vertex and fragment shaders
+        vertSource = (' ' + shaderSource.v).slice(1);
+        fragSource = (' ' + shaderSource.f).slice(1);
         if (replacements != null)
         {
-            vertSource = GLU.applyShaderReplacements(vertSource, replacements);
-            if (fragSource instanceof Array)
+            for (var pattern in replacements) 
             {
-                let fragSourceReplacement = []
-                for (let i=0; i<fragSource.length; i++)
+                if (replacements.hasOwnProperty(pattern)) 
                 {
-                    let fs = fragSource[i];
-                    fs = GLU.applyShaderReplacements(fs, replacements);
-                    fragSourceReplacement.push(fs);
+                    vertSource = vertSource.replace(new RegExp(pattern, 'g'), replacements[pattern]);
+                    fragSource = fragSource.replace(new RegExp(pattern, 'g'), replacements[pattern]);
                 }
-                fragSource = fragSourceReplacement;
-            }
-            else
-            {
-                fragSource = GLU.applyShaderReplacements(fragSource, replacements);
             }
         };
+        var vertexShader       = GLU.compileShaderSource(name, vertSource, gl.VERTEX_SHADER);
+        var fragmentShader     = GLU.compileShaderSource(name, fragSource, gl.FRAGMENT_SHADER);
 
-        // Compile vertex shader and one or more fragment shaders
-        var vertexShader = GLU.compileShaderSource(name, vertSource, gl.VERTEX_SHADER);
-        let fragmentShaders = null;
-        if (fragSource instanceof Array)
+        this.program = null;
+        if (vertexShader && fragmentShader)
         {
-            fragmentShaders = [];
-            for (let i=0; i<fragSource.length; i++)
-            {
-                let fs = GLU.compileShaderSource(name, fragSource[i], gl.FRAGMENT_SHADER);
-                fragmentShaders.push(fs);
-            }
+            this.program = GLU.createProgram(vertexShader, fragmentShader);
         }
-        else
+
+        if (this.program && !gl.getProgramParameter(this.program, gl.LINK_STATUS))
         {
-            fragmentShaders = GLU.compileShaderSource(name, fragSource, gl.FRAGMENT_SHADER);
+            trinity.link_error(gl.getProgramInfoLog(this.program), "failed to link");
+            this.program = null;
         }
-        
-        // Link shaders
-        this.program = GLU.createProgram(vertexShader, fragmentShaders, vertSource, fragSource);
-        if (!gl.getProgramParameter(this.program, gl.LINK_STATUS))
-            alert("Could not initialise shaders");
+            
         this.uniforms = {};
     }
 
@@ -581,6 +525,11 @@ var GLU = {};
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
+    this.RenderTarget.prototype.delete = function()
+    {
+        gl.deleteFramebuffer(this.glName);
+    }
+
     this.RenderTarget.prototype.attachTexture = function(texture, index) 
     {
         gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + index, gl.TEXTURE_2D, texture.glName, 0);
@@ -608,16 +557,19 @@ var GLU = {};
     {
         var sorryP = document.createElement("p"); 
         sorryP.appendChild(document.createTextNode("[Trinity] error occurred:"));
-        sorryP.style.fontSize = "24px";
-        sorryP.style.color = 'darkorange';
+        sorryP.style.fontSize = "32px";
+        sorryP.style.fontFamily = 'courier';
+        sorryP.style.color = 'red';
+        sorryP.style.position = 'absolute';
+        sorryP.style.top = '0px';
 
         var failureP = document.createElement("p");
         failureP.className = "warning-box";
-        failureP.style.fontSize = "18px";
-        failureP.style.overflow = "scroll";
-        failureP.style.height = "85%";
-        failureP.style.color = "darkblue";
-        failureP.innerHTML = '<pre>' + '   ' + message + '</pre>';
+        failureP.style.fontSize = "24px";
+        failureP.style.fontFamily = 'courier';
+        failureP.style.position = 'absolute';
+        failureP.style.top = '40px';
+        failureP.innerHTML = '<pre>' + '    ' + message + '</pre>';
 
         var failureDiv = document.createElement("div"); 
         failureDiv.className = "center";
@@ -627,71 +579,11 @@ var GLU = {};
         document.getElementById("container").appendChild(failureDiv);
         this.canvas.style.display = 'none';
 
+        $(trinity.editor.getWrapperElement()).hide();
+        $(trinity.error_editor.getWrapperElement()).hide();
+        $("#toggle-code-button").hide();
         trinity.terminated = true;
         throw new Error("Terminating Trinity");
-    }
-
-    // Create CSS rules for the document contents
-    let style = document.createElement("style");
-    style.appendChild(document.createTextNode("")); // WebKit hack :(
-    document.head.appendChild(style);
-    let sheet = window.document.styleSheets[0];
-
-    sheet.insertRule(`body{
-  margin: 0px;
-  overflow: hidden;
-}`, sheet.cssRules.length);
-
-    sheet.insertRule(`#container {
-    position: relative;
-    margin: 0px;
-    padding: 0px;
-}`, sheet.cssRules.length);
-
-    sheet.insertRule(`#textContainer {
-    position: absolute;
-    margin: 0px;
-    overflow: hidden;
-    left: 0px;
-    top: 0px;
-    pointer-events: none;   
-    z-index: 1;
-}`, sheet.cssRules.length);
-
-    sheet.insertRule(`#gui { 
-    position: absolute; 
-    z-index: 100;
-    right: 0px;
-}`, sheet.cssRules.length);
-
-    // Create here the DOM elements for renderer and text canvas
-    var container = document.createElement("div");
-    container.id = "container";
-    document.body.appendChild(container);
-
-    var render_canvas = document.createElement('canvas');
-    render_canvas.id = "render-canvas";
-    render_canvas.width  = window.innerWidth;
-    render_canvas.height = window.innerHeight;
-    container.appendChild(render_canvas);
-    this.canvas = render_canvas;
-
-    var textContainer = document.createElement("div");
-    textContainer.id = "textContainer";
-    container.appendChild(textContainer);
-
-    var text_canvas = document.createElement('canvas');
-    text_canvas.id = "text-canvas";
-    textContainer.appendChild(text_canvas);
-
-    try 
-    {
-        this.setupGL();
-    }
-    catch (e) 
-    {
-        this.fail(e.message + ". Trinity can't run in your browser.");
-        return;
     }
 
     var gl = this.gl;

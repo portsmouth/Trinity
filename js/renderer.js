@@ -6,29 +6,24 @@ var Renderer = function()
 	let gl = GLU.gl;
 
     // Default user-adjustable properties
-    this.exposure = -1.0;
-    this.gamma = 2.2;
-    this.colorA = [1.0,0.8,0.5];
-    this.colorB = [1.0,0.8,0.5];
-    this.blackbodyEmission = -9.5;
-    this.debrisExtinction = 40.0;
-    this.TtoKelvin = 4.0;
+    this.settings = {};
+
+    this.settings.exposure = -1.0;
+    this.settings.gamma = 2.2;
+    this.settings.blackbodyEmission = -9.5;
+    this.settings.debrisExtinction = 20.0;
+    this.settings.TtoKelvin = 1.0;
 
     // Internal buffers and programs
     this.boxVbo = null;
     this.quadVbo = this.createQuadVbo();
-    this.fbo = new GLU.RenderTarget();
 
     this.volumeProgram    = null;
     this.lineProgram      = null;
     this.tonemapProgram   = null;
 
     // Specify shaders
-    this.shaderSources = GLU.resolveShaderSource({
-        'volume'         : {'v': 'volume-vertex-shader',  'f': 'volume-fragment-shader'},
-        'tonemap'        : {'v': 'tonemap-vertex-shader', 'f': 'tonemap-fragment-shader'},
-        'line'           : {'v': 'line-vertex-shader',    'f': 'line-fragment-shader'}
-    });
+    this.shaderSources = GLU.resolveShaderSource(["volume", "tonemap", "line"]);
 
 	var render_canvas = trinity.render_canvas;
     render_canvas.width  = window.innerWidth;
@@ -36,6 +31,7 @@ var Renderer = function()
     this._width = render_canvas.width;
     this._height = render_canvas.height;
 
+    this.compiled_successfully = false;
     this.compileShaders();
 
      // Trigger initial buffer generation
@@ -101,45 +97,34 @@ Renderer.prototype.createBoxVbo = function(origin, extents)
     return vbo;
 }
 
-Renderer.prototype.reset = function(no_recompile = false)
-{
-    this.numFramesSinceReset = 0;
-    if (!no_recompile) this.compileShaders();
-}
-
-
 Renderer.prototype.resize = function(width, height)
 {
     this._width = width;
     this._height = height;
-
-    if (this.fbo)
-	    this.fbo.unbind();
     this.quadVbo = this.createQuadVbo();
-    //this.fbo = new GLU.RenderTarget();
-
-    this.reset(true);
-}
-
-
-/**
-* Restart accumulating samples.
-* @param {Boolean} [no_recompile=false] - set to true if shaders need recompilation too
-*/
-Renderer.prototype.reset = function(no_recompile = false)
-{
-    if (!no_recompile) this.compileShaders();
 }
 
 Renderer.prototype.compileShaders = function()
 {
-	this.volumeProgram  = new GLU.Shader('volume',  this.shaderSources, null);
-	this.lineProgram    = new GLU.Shader('line',    this.shaderSources, null);
-	this.tonemapProgram = new GLU.Shader('tonemap', this.shaderSources, null);
+    if (this.compiled_successfully)
+        return;
+
+    this.volumeProgram  = new GLU.Shader('volume',  this.shaderSources, null);
+    if (!this.volumeProgram.program) { this.volumeProgram = null; return; }
+
+    this.lineProgram    = new GLU.Shader('line',    this.shaderSources, null);
+    if (!this.lineProgram.program) { this.lineProgram = null; return; }
+
+    this.tonemapProgram = new GLU.Shader('tonemap', this.shaderSources, null);
+    if (!this.tonemapProgram.program) { this.tonemapProgram = null; return; }
+
+    this.compiled_successfully = true;
 }
 
 Renderer.prototype.render = function(solver)
 {
+    // @todo:  render only on dirty
+
 	let gl = GLU.gl;
 
     gl.disable(gl.DEPTH_TEST);
@@ -195,11 +180,11 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniformI("Nraymarch", 256);
 
         // Physics
-        this.volumeProgram.uniformF("debrisExtinction", this.debrisExtinction);
-        this.volumeProgram.uniformF("blackbodyEmission", Math.pow(2.0, this.blackbodyEmission));
-        this.volumeProgram.uniformF("TtoKelvin", this.TtoKelvin);
-        this.volumeProgram.uniformF("exposure", this.exposure);
-        this.volumeProgram.uniformF("invGamma", 1.0/this.gamma);
+        this.volumeProgram.uniformF("debrisExtinction", this.settings.debrisExtinction);
+        this.volumeProgram.uniformF("blackbodyEmission", Math.pow(2.0, this.settings.blackbodyEmission));
+        this.volumeProgram.uniformF("TtoKelvin", this.settings.TtoKelvin);
+        this.volumeProgram.uniformF("exposure", this.settings.exposure);
+        this.volumeProgram.uniformF("invGamma", 1.0/this.settings.gamma);
 
         this.quadVbo.bind();
         this.quadVbo.draw(this.volumeProgram, gl.TRIANGLE_FAN);

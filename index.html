@@ -1,0 +1,322 @@
+<body onload="onLoad();" style="
+margin: 0px;
+overflow: hidden;
+height: 100%;
+width: 100%;
+background-size: 100%;">
+
+<style>
+/*
+<script src='./js/compiled/trinity.min.js'></script>
+*/
+</style>
+
+
+<script src='./js/thirdparty/jquery-3.3.1.min.js'></script>
+<script src='./js/thirdparty/jquery-ui.min.js'></script>
+<script src='./js/thirdparty/jquery-ui.css.js'></script>
+<script src='./js/thirdparty/codemirror/codemirror.js'></script>
+<script src='./js/thirdparty/codemirror/codemirror.css.js'></script>
+<script src='./js/thirdparty/codemirror/clike.js'></script>
+<script src='./js/thirdparty/gif.js/gif.js'></script>
+<script src='./js/thirdparty/gif.js/gif.worker.js'></script>
+<script src='./js/thirdparty/three/three.min.js'></script>
+<script src='./js/thirdparty/three/libs/stats.min.js'></script>
+<script src='./js/thirdparty/three/libs/dat.gui.min.js'></script>
+<script src='./js/thirdparty/three/controls/OrbitControls.js'></script>
+<script src='./js/gl.js'></script>
+<script src='./js/presets.js'></script>
+<script src='./js/gui.js'></script>
+<script src='./js/shaders.js'></script>
+<script src='./js/renderer.js'></script>
+<script src='./js/solver.js'></script>
+<script src='./js/trinity.js'></script>
+
+
+<div id='container' style='
+position: relative;
+margin: 0px;
+padding: 0px;
+'>
+    <div id='gui' style='
+    position:absolute;
+    z-index:-2;
+    '></div>
+
+    <button class='toggle-code-button-class' id='toggle-code-button' style='
+    position:absolute;
+    z-index:1;
+    border:none;
+    top: 0px;
+    display:inline-block;
+    margin-left:5px;
+    padding:8;
+    outline:0;
+    width: 10px;
+    height: 10px;
+    box-shadow:none!important;
+    background:none;
+    color: rgb(58, 227, 139);
+    font-size:24px;
+    '>&#9776</button>
+
+    <button class='share-button-class' id='share-button' style='
+    left: 34px;
+    position:absolute;
+    z-index:1;
+    border:none;
+    top: 0px;
+    display:inline-block;
+    margin-left:5px;
+    padding:8;
+    outline:0;
+    width: 10px;
+    height: 10px;
+    box-shadow:none!important;
+    background:none;
+    color: rgb(26, 161, 242);
+    font-size:24px;
+    '>&#9776</button>
+
+    <style>
+    .toggle-code-button-class:hover,
+    .toggle-code-button-class:focus {
+        color: rgb(192, 225, 208)!important;
+        text-decoration: none;
+        cursor: pointer;
+    }
+    .share-button-class:hover,
+    .share-button-class:focus {
+        color: rgb(146, 202, 232)!important;
+        text-decoration: none;
+        cursor:rgb(107, 107, 210)
+    }
+    </style>
+
+    <textarea id="textarea-code" name="textarea-code"> 
+    </textarea>
+
+    <textarea id="textarea-errors" name="textarea-errors"> 
+    </textarea>
+
+    <div style='position:relative; pointer-events:none;'>
+        <canvas id='render-canvas' style='
+        position:relative;
+        left: 0; top: 0;
+        height: 100%;
+        width: 100%;
+        z-index:-10;
+        pointer-events: none;  
+        '></canvas>
+        <canvas id='text-canvas' style='
+        position:absolute;
+        left: 0; top: 0;
+        height: 100%;
+        width: 100%;
+        z-index:-10;
+        pointer-events: none;  
+        '></canvas>
+    </div>
+</div>
+
+<style>
+/* The share-link modal (background) */
+.modal {
+    display: none; /* Hidden by default */
+    position: fixed; /* Stay in place */
+    z-index: 1; /* Sit on top */
+    left: 0;
+    top: 0;
+    width: 100%; /* Full width */
+    height: 100%; /* Full height */
+    overflow: auto; /* Enable scroll if needed */
+    background-color: rgb(0,0,0); /* Fallback color */
+    background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+}
+/* share-link modal Content/Box */
+.modal-content {
+    background-color: #fefefe;
+    color: #aaa;
+    margin: 15% auto; /* 15% from the top and centered */
+    padding: 8px;
+    border: 1px solid #888;
+    width: 80%; /* Could be more or less, depending on screen size */
+    word-wrap: break-word !important;
+    white-space: normal !important;
+    font-family: sans-serif;
+    font-size: 20px;
+    font-weight: bold;
+}
+/* share-link modal Close Button */
+.close {
+    color: #aaa;
+    margin: 0% auto; /* 15% from the top and centered */
+    padding: 0px;
+    top: 0 !important;;
+    float: right;
+    font-size: 30px;
+    font-weight: bold;
+}
+.close:hover,
+.close:focus {
+    color: black;
+    text-decoration: none;
+    cursor: pointer;
+}
+</style>
+
+<!-- share-link-modal -->
+<div id="share-link-modal" class="modal">
+  <!-- share-link modal modal content -->
+  <div class="modal-content">
+    <span class="close">&times;</span>
+    Shareable link :
+    <textarea readonly rows='10' id='share-text' style='
+position:relative; 
+resize: none;
+display:block;
+background-color: #fefefe;
+width:100%;
+word-wrap: break-word !important;
+white-space: normal !important;
+font-family: sans-serif;
+z-index:10;
+'></textarea>
+  </div>
+</div>
+
+
+<script type="text/javascript">
+
+var editor;
+var error_editor;
+
+function onLoad() 
+{ 
+    let canvas = document.getElementById("render-canvas");
+    GLU.setupGL(canvas);
+    gl = GLU.gl;
+
+    // Load CodeMirror and jquery-ui (for resizable) CSS rules
+    var styleElement = document.createElement('style');
+    styleElement.appendChild(document.createTextNode(codemirror_css_rules));
+    styleElement.appendChild(document.createTextNode(jquery_ui_css_rules));
+    document.getElementsByTagName('head')[0].appendChild(styleElement);
+
+    // Set up CodeMirror instance for code editor:
+    let code_textarea = document.getElementById("textarea-code");
+    editor = CodeMirror(function(elt) {
+        code_textarea.parentNode.replaceChild(elt, code_textarea);
+    }, {
+        lineNumbers: true,
+        mode: "x-shader/x-fragment"
+    });
+    $( function() {
+        $(editor.getWrapperElement()).resizable();
+    } );
+    $(editor.getWrapperElement()).resizable({
+        resize: function() {
+            editor.setSize($(this).width(), $(this).height());
+            editor.refresh();
+        }
+    });
+    editor.setOption("theme", 'lucario');
+
+    let code = '';
+    editor.setValue(code);
+
+    // Set up CodeMirror instance for error reports:
+    let error_textarea = document.getElementById("textarea-errors");
+    error_editor = CodeMirror(function(elt) {
+        error_textarea.parentNode.replaceChild(elt, error_textarea);
+    }, {
+        lineNumbers: false,
+        extraKeys: {"Ctrl-Space": "autocomplete"},
+        viewportMargin: Infinity,
+        mode: "x-shader/x-fragment",
+        readOnly: true,
+        autofocus: true
+    });
+    error_editor.setOption("theme", 'monokai');
+    error_editor.setValue('');
+    $(error_editor.getWrapperElement()).hide();
+
+    // Instantiate Trinity
+    trinity = new Trinity(editor, error_editor);
+
+    // setup CodeMirror events
+    var cmEl = document.querySelector('.CodeMirror');
+    cmEl.addEventListener('mouseenter', function(e) {
+        trinity.camControls.enabled = false;
+        trinity.editing = true;
+    });
+    cmEl.addEventListener('mousemove', function(e) {
+        var edRect = cmEl.getBoundingClientRect();
+        if (e.clientX >= edRect.left && e.clientX <= edRect.right &&
+            e.clientY >= edRect.top  && e.clientY <= edRect.bottom)
+        {
+            trinity.camControls.enabled = false;
+            trinity.editing = true;
+            return;
+        }
+        trinity.editing = false;
+        trinity.camControls.enabled = true;
+    });
+    cmEl.addEventListener('mouseleave', function(e) {
+        trinity.camControls.enabled = true;
+        trinity.editing = false;
+    });
+    cmEl.addEventListener('keydown', function(e) {
+        if (trinity.editing)
+        {
+            trinity.camControls.enabled = false;
+        }
+        else
+        {
+            trinity.camControls.enabled = true;
+            e.codemirrorIgnore = true;
+            e.preventDefault();
+        }
+    });
+
+    // start animate loop
+    animateLoop()
+}
+
+function animateLoop()
+{
+    trinity.step();
+    window.requestAnimationFrame(animateLoop);
+}
+
+$(document).ready(function()
+{
+    $('#div-code').hide();
+
+    $("#toggle-code-button").click(function(){
+        $(editor.getWrapperElement()).fadeToggle(1000);
+    });
+
+    // Set up modal popup window with share-able link
+    var modal = document.getElementById('share-link-modal');
+    var btn = document.getElementById("share-button");
+    var span = document.getElementsByClassName("close")[0];
+    btn.onclick = function() {
+        modal.style.display = "block";
+        document.getElementById('share-text').innerHTML = trinity.get_url();
+        document.getElementById('share-text').select();
+        document.execCommand("copy");
+    }
+    span.onclick = function() {
+        modal.style.display = "none";
+    }
+    window.onclick = function(event) {
+        if (event.target == modal) {
+            modal.style.display = "none";
+        }
+    }
+});
+
+</script>
+
+</body>

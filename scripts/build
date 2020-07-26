@@ -32,16 +32,25 @@ print ('\n******************\nminify code into trinity.min.js ...')
 # Construct the command for Google Closure Compiler, to generate minified code
 jsDestPath = "../js/compiled/trinity.min.js"
 jsSources = [ 
-'../js/thirdparty/jquery-1.11.3.min.js',
+'../js/thirdparty/jquery-3.3.1.min.js',
+'../js/thirdparty/jquery-ui.min.js',
+'../js/thirdparty/jquery-ui.css.js',
+'../js/thirdparty/codemirror/codemirror.js',
+'../js/thirdparty/codemirror/codemirror.css.js',
+'../js/thirdparty/codemirror/clike.js',
+'../js/thirdparty/gif.js/gif.js',
+'../js/thirdparty/gif.js/gif.worker.js',
 '../js/thirdparty/three/three.min.js',
 '../js/thirdparty/three/libs/stats.min.js',
 '../js/thirdparty/three/libs/dat.gui.min.js',
 '../js/thirdparty/three/controls/OrbitControls.js',
 '../js/gl.js',
+'../js/presets.js',
 '../js/gui.js',
 '../js/shaders.js',
 '../js/renderer.js',
-'../js/trinity.js' 
+'../js/solver.js',
+'../js/trinity.js'
 ]
 
 lib_files = ' '.join(jsSources)
@@ -53,11 +62,10 @@ os.system(cmd)
 
 print ('\n******************\nbuild documentation via jsdoc2md ...')
 jsSources = [
-'../js/trinity.js', 
+'../js/trinity.js',
 '../js/solver.js',
-'../js/renderer.js', 
-'../js/simulation.js', 
-'../js/gui.js', 
+'../js/renderer.js',
+'../js/gui.js',
 '../js/gl.js'
 ]
 api_files = ' '.join(jsSources)

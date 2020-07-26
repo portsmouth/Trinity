@@ -14,6 +14,9 @@ uniform sampler2D Vair_sampler; // 0, vec3 velocity field
 /////// output buffers ///////
 layout(location = 0) out vec4 divVair_output;
 
+/////////////////////// user-defined code ///////////////////////
+_USER_CODE_
+/////////////////////// user-defined code ///////////////////////
 
 vec3 mapFragToVs(in ivec2 frag)
 {
@@ -39,15 +42,6 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     int iu = col*Nx + i;
     int iv = row*Nz + k;
     return ivec2(iu, iv);
-}
-
-bool isSolid(in vec3 wsP, // world space point of current voxel
-             in vec3 L)   // world-space extents of grid (also the upper right corner in world spa
-{
-    // define regions which are solid (static) obstacles
-    vec3 C = L/2.0;
-    float r = length(wsP - C);
-    return r <= L.x/2.5;
 }
 
 bool isSolidCell(in ivec3 vsPi)

@@ -10,8 +10,7 @@ var GUI = function(visible = true)
 	var gui = this.gui;
 	this.visible = visible;
 
-	this.createSimulationSettings();
-	this.createRendererSettings();
+	this.createguiSettings();
 	if (!visible)
 		this.gui.__proto__.constructor.toggleHide();
 }
@@ -35,6 +34,27 @@ GUI.prototype.sync = function()
 	updateDisplay(this.gui);
 }
 
+dat.GUI.prototype.removeFolder = function(name) {
+	var folder = this.__folders[name];
+	if (!folder) {
+	  return;
+	}
+	folder.close();
+	this.__ul.removeChild(folder.domElement.parentNode);
+	delete this.__folders[name];
+	this.onResize();
+  }
+
+  
+GUI.prototype.refresh = function()
+{
+    if (this.presetsFolder    != undefined) this.gui.removeFolder(this.presetsFolder.name);
+    if (this.simulationFolder != undefined) this.gui.removeFolder(this.simulationFolder.name);
+    if (this.rendererFolder   != undefined) this.gui.removeFolder(this.rendererFolder.name);
+
+    this.createguiSettings();
+}
+
 GUI.prototype.toggleHide = function()
 {
 	this.visible = !this.visible;
@@ -50,53 +70,34 @@ function hexToRgb(hex)
     } : null;
 }
 
+
+GUI.prototype.createguiSettings = function()
+{
+    this.guiSettings = {};
+
+    // Presets folder
+    this.presetsFolder = this.gui.addFolder('Presets');
+    let preset_names = trinity.presets.get_preset_names();
+    this.presetSettings = {};
+    this.presetSettings["preset"] = trinity.preset_selection;
+    var presetItem = this.presetsFolder.add(this.presetSettings, 'preset', preset_names);
+    presetItem.onChange(function(preset_name) { trinity.presets.load_preset(preset_name); });
+
+	this.createSimulationSettings();
+	this.createRendererSettings();
+}
+
 GUI.prototype.createRendererSettings = function()
 {
-	this.rendererFolder = this.gui.addFolder('Raytracer');
+	this.rendererFolder = this.gui.addFolder('Raymarcher');
 	var renderer = trinity.getRenderer();
 	var camera = trinity.getCamera();
 
-	this.rendererFolder.add(renderer, 'exposure', -10.0, 10.0);
-	this.rendererFolder.add(renderer, 'gamma', 1.0, 3.0);
-    this.rendererFolder.add(renderer, 'debrisExtinction', 0.0, 100.0);
-	this.rendererFolder.add(renderer, 'blackbodyEmission', -20.0, 20.0);
-	this.rendererFolder.add(renderer, 'TtoKelvin', 0.0, 10.0);
-
-	this.rendererFolder.colorA = [renderer.colorA[0]*255.0, renderer.colorA[1]*255.0, renderer.colorA[2]*255.0];
-	let itemA = this.rendererFolder.addColor(this.rendererFolder, 'colorA');
-	itemA.onChange( function(c) {
-								if (typeof c==='string' || c instanceof String)
-								{
-									var color = hexToRgb(c);
-									renderer.colorA[0] = color.r/255.0;
-									renderer.colorA[1] = color.g/255.0;
-									renderer.colorA[2] = color.b/255.0;
-								}
-								else
-								{
-									renderer.colorA[0] = c[0]/255.0;
-									renderer.colorA[1] = c[1]/255.0;
-									renderer.colorA[2] = c[2]/255.0;
-								}
-							} );
-
-	this.rendererFolder.colorB = [renderer.colorB[0]*255.0, renderer.colorB[1]*255.0, renderer.colorB[2]*255.0];
-	let itemB = this.rendererFolder.addColor(this.rendererFolder, 'colorB');
-	itemB.onChange( function(c) {
-								if (typeof c==='string' || c instanceof String)
-								{
-									var color = hexToRgb(c);
-									renderer.colorB[0] = color.r/255.0;
-									renderer.colorB[1] = color.g/255.0;
-									renderer.colorB[2] = color.b/255.0;
-								}
-								else
-								{
-									renderer.colorB[0] = c[0] / 255.0;
-									renderer.colorB[1] = c[1] / 255.0;
-									renderer.colorB[2] = c[2] / 255.0;
-								}
-							} );
+	this.rendererFolder.add(renderer.settings, 'exposure', -10.0, 10.0);
+	this.rendererFolder.add(renderer.settings, 'gamma', 1.0, 3.0);
+    this.rendererFolder.add(renderer.settings, 'debrisExtinction', 0.0, 100.0);
+	this.rendererFolder.add(renderer.settings, 'blackbodyEmission', -20.0, 20.0);
+	this.rendererFolder.add(renderer.settings, 'TtoKelvin', 0.0, 10.0);
 
 	this.rendererFolder.close();
 }
@@ -106,36 +107,36 @@ GUI.prototype.createSimulationSettings = function()
     var solver = trinity.getSolver();
 
     this.simulationFolder = this.gui.addFolder('Simulation');
-    
-    this.simulationFolder.add(solver, 'Nx', 32, 512).onChange( function(Nx) { solver.resize(Math.floor(Nx), solver.Ny, solver.Nz); } );
-    this.simulationFolder.add(solver, 'Ny', 32, 512).onChange( function(Ny) { solver.resize(solver.Nx, Math.floor(Ny), solver.Nz); } );
-    this.simulationFolder.add(solver, 'Nz', 32, 512).onChange( function(Nz) { solver.resize(solver.Nx, solver.Ny, Math.floor(Nz)); } );
-    this.simulationFolder.add(solver, 'NprojSteps', 1, 256).onChange( function(NprojSteps) { solver.NprojSteps = NprojSteps; solver.reset(); } );
-    this.simulationFolder.add(solver, 'timestep', 0.0, 10.0).onChange( function() { solver.reset(); } );
-	this.simulationFolder.add(solver, 'vorticity_scale', 0.0, 0.99).onChange( function() { solver.reset(); } );
-	
+
+    this.simulationFolder.add(solver.settings, 'Nx', 32, 512).onChange(                function(Nx) { solver.resize(Math.floor(Nx), solver.settings.Ny, solver.settings.Nz); } );
+    this.simulationFolder.add(solver.settings, 'Ny', 32, 512).onChange(                function(Ny) { solver.resize(solver.settings.Nx, Math.floor(Ny), solver.settings.Nz); } );
+    this.simulationFolder.add(solver.settings, 'Nz', 32, 512).onChange(                function(Nz) { solver.resize(solver.settings.Nx, solver.settings.Ny, Math.floor(Nz)); } );
+    this.simulationFolder.add(solver.settings, 'NprojSteps', 1, 256).onChange(         function(NprojSteps) { solver.NprojSteps = NprojSteps; solver.restart(); } );
+    this.simulationFolder.add(solver.settings, 'timestep', 0.0, 10.0).onChange(        function() { solver.restart(); } );
+	this.simulationFolder.add(solver.settings, 'vorticity_scale', 0.0, 0.99).onChange( function() { solver.restart(); } );
+
 	// @todo: move to user code
-    this.simulationFolder.add(solver, 'blastHeight', 0.0, 1.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'blastRadius', 0.0, 1.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'blastTemperature', 0.0, 100000.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'blastVelocity', 0.0, 1000.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'debrisHeight', 0.0, 1.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'debrisFalloff', 0.0, 1.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'gravity', 0.0, 1.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'T0', 0.0, 1000.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'Tambient', 0.0, 1000.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'buoyancy', 0.0, 1.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'expansion', 0.0, 1.0).onChange( function() { solver.reset(); } );
-    this.simulationFolder.add(solver, 'radiationLoss', 0.0, 1.0).onChange( function() { solver.reset(); } );
+    this.simulationFolder.add(solver, 'blastHeight', 0.0, 1.0).onChange(           function() { solver.restart(); } );
+    this.simulationFolder.add(solver, 'blastRadius', 0.0, 1.0).onChange(           function() { solver.restart(); } );
+    this.simulationFolder.add(solver, 'blastTemperature', 0.0, 100000.0).onChange( function() { solver.restart(); } );
+    this.simulationFolder.add(solver, 'blastVelocity', 0.0, 1000.0).onChange(      function() { solver.restart(); } );
+    this.simulationFolder.add(solver, 'debrisHeight', 0.0, 1.0).onChange(          function() { solver.restart(); } );
+    this.simulationFolder.add(solver, 'debrisFalloff', 0.0, 1.0).onChange(         function() { solver.restart(); } );
+    this.simulationFolder.add(solver, 'gravity', 0.0, 1.0).onChange(               function() { solver.restart(); } );
+    this.simulationFolder.add(solver, 'T0', 0.0, 1000.0).onChange(                 function() { solver.restart(); } );
+    this.simulationFolder.add(solver, 'Tambient', 0.0, 1000.0).onChange(           function() { solver.restart(); } );
+    this.simulationFolder.add(solver, 'buoyancy', 0.0, 1.0).onChange(              function() { solver.restart(); } );
+    this.simulationFolder.add(solver, 'expansion', 0.0, 1.0).onChange(             function() { solver.restart(); } );
+    this.simulationFolder.add(solver, 'radiationLoss', 0.0, 1.0).onChange(         function() { solver.restart(); } );
 
     let button = { nuke:function(){ solver.reset(); }};
     let button_ui = this.simulationFolder.add(button, 'nuke').name('NUKE');
     button_ui.__li.className = 'cr link footer';
-    
+
     this.simulationFolder.open();
 }
 
-/** 
+/**
  * Add a dat.GUI UI slider to control a float parameter.
  * The scene parameters need to be organized into an Object as
  * key-value pairs, for supply to this function.
@@ -144,7 +145,7 @@ GUI.prototype.createSimulationSettings = function()
  * @param {Object} folder - optionally, pass the dat.GUI folder to add the parameter to (defaults to the main scene folder)
  * @returns {Object} the created dat.GUI slider item
  * @example
- *		Scene.prototype.initGui = function(gui)            
+ *		Scene.prototype.initGui = function(gui)
  *		{
  *			gui.addSlider(this.parameters, c);
  *			gui.addSlider(this.parameters, {name: 'foo2', min: 0.0, max: 1.0});

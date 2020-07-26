@@ -7,14 +7,14 @@
 
 var trinity;
 
-var Trinity = function()
+var Trinity = function(editor, error_editor)
 {
     trinity = this;
 
-    this.initialized = false;
-    this.terminated = false;
-    this.rendering = false;
-    
+    this.editor = editor;
+    this.error_editor = error_editor;
+    $(this.error_editor.getWrapperElement()).hide();
+
     let container = document.getElementById("container");
     this.container = container;
 
@@ -27,8 +27,10 @@ var Trinity = function()
 
     var text_canvas = document.getElementById('text-canvas');
     this.text_canvas = text_canvas;
+    this.text_canvas.style.width = render_canvas.width;
+    this.text_canvas.style.height = render_canvas.height;
     this.textCtx = text_canvas.getContext("2d");
-    this.onGravyLink = false;
+    this.onTrinityLink = false;
     this.onUserLink = false;
 
     window.addEventListener( 'resize', this, false );
@@ -42,12 +44,23 @@ var Trinity = function()
     this.camera.up.set(0, 1, 0);
     this.camera.position.set(1, 1, 1);
     this.camera.lookAt(new THREE.Vector3(0, 0, 0));
-    
+
     this.camControls = new THREE.OrbitControls(this.camera, this.container);
     this.camControls.zoomSpeed = 2.0;
     this.camControls.flySpeed = 0.01;
-    this.camControls.addEventListener('change', camChanged);
+    this.disable_reset = false;
+    //this.camControls.addEventListener('change', function() {
+    //                                                        if (trinity.disable_reset) return;
+    //                                                        var no_recompile = true;
+    //                                                        trinity.reset(no_recompile);
+    //                                                    });
     this.camControls.keyPanSpeed = 100.0;
+
+    this.camControls.saveState = function () {
+        this.target0.copy( this.target );
+        this.position0.copy( this.object.position );
+        this.zoom0 = this.object.zoom;
+    };
 
     this.gui = null;
     this.guiVisible = true;
@@ -57,15 +70,21 @@ var Trinity = function()
 
     // Instantiate renderer
     this.renderer = new Renderer();
-    
-    // initialize
-    this.init();
-  
-    // Do initial resize:
-    this.resize();
+
+    // Field presets
+    this.presets = new Presets();
+    this.preset_selection = 'None';
 
     // Create dat gui
     this.gui = new GUI(this.guiVisible);
+
+    // Setup codemirror events:
+    let SOLVER = this.solver;
+    this.editor.on("change", function(cm, n) {
+        trinity.code = cm.getValue();
+        SOLVER.updateShaders();
+    });
+    this.editing = false;
 
     // Setup keypress and mouse events
     window.addEventListener( 'mousemove', this, false );
@@ -75,7 +94,14 @@ var Trinity = function()
     window.addEventListener( 'click', this, false );
     window.addEventListener( 'keydown', this, false );
 
-    this.initialized = true;
+    // Attempt to load from current URL
+    if (!this.load_url(window.location.href))
+    {
+        this.presets.load_preset('Basic plume');
+    }
+
+    // Do initial resize:
+    this.resize();
 }
 
 /**
@@ -164,10 +190,128 @@ Trinity.prototype.showGUI = function(show)
 
 
 
-Trinity.prototype.init = function()
-{    
+///////////////////////////////////////////////////////////////
+// App state management
+///////////////////////////////////////////////////////////////
+
+Trinity.prototype.getQueryParam = function(url, key)
+{
+    var queryStartPos = url.indexOf('?');
+    if (queryStartPos === -1) {
+        return null;
+    }
+    var params = url.substring(queryStartPos + 1).split('&');
+    for (var i = 0; i < params.length; i++) {
+        var pairs = params[i].split('=');
+        if (decodeURIComponent(pairs.shift()) == key) {
+        return decodeURIComponent(pairs.join('='));
+        }
+    }
+}
+
+Trinity.prototype.get_escaped_stringified_state = function(state)
+{
+    let json_str = JSON.stringify(state);
+    var json_str_escaped = json_str.replace(/[\\]/g, '\\\\')
+                                    .replace(/[\b]/g, '\\b')
+                                    .replace(/[\f]/g, '\\f')
+                                    .replace(/[\n]/g, '\\n')
+                                    .replace(/[\r]/g, '\\r')
+                                    .replace(/[\t]/g, '\\t');
+    return json_str_escaped;
+}
+
+Trinity.prototype.get_stringified_state = function(state)
+{
+    let json_str = JSON.stringify(state);
+    return json_str;
+}
+
+Trinity.prototype.get_url = function()
+{
+    let state = this.get_state();
+    let objJsonStr = this.get_stringified_state(state);
+    let objJsonB64 = btoa(objJsonStr);
+
+    let URL = window.location.href;
+    var separator_index = URL.indexOf('?');
+    if (separator_index > -1)
+    {
+        URL = URL.substring(0, separator_index);
+    }
+    URL += '?settings=' + encodeURIComponent(objJsonB64);
+    history.pushState(null, '', URL);
+    return URL;
+}
+
+Trinity.prototype.get_state = function()
+{
+    let camPos = this.camera.position;
+    let camTar = this.camControls.target;
+    let camera_settings = { pos: [camPos.x, camPos.y, camPos.z],
+                            tar: [camTar.x, camTar.y, camTar.z],
+                            near: this.camera.near,
+                            far:  this.camera.far
+    };
+    let editor_settings = { code: this.code } ;
+    let gui_settings = { visible: this.getGUI().visible };
+    let state = { R: this.renderer.settings,
+                  S: this.solver.settings,
+                  C: camera_settings,
+                  G: gui_settings,
+                  E: editor_settings};
+
+    return state;
+}
+
+Trinity.prototype.load_url = function(url)
+{
+    let URL = url;
+    let objJsonB64 = this.getQueryParam(URL, 'settings');
+    if (!objJsonB64) return false;
+
+    let setting_str = atob(objJsonB64);
+    if (!setting_str) return false;
+    let state = JSON.parse(setting_str);
+
+    this.load_state(state);
+    return true;
+}
+
+Trinity.prototype.load_state = function(state)
+{
+    // Load camera state
+    let camera_settings = state.C;
+    let P = camera_settings.pos;
+    let T = camera_settings.tar;
+    let near = camera_settings.near;
+    let far = camera_settings.far;
+    this.camera.position.copy(new THREE.Vector3(P[0], P[1], P[2]));
+    this.camera.near = near;
+    this.camera.far = far;
+    this.camControls.target.copy(new THREE.Vector3(T[0], T[1], T[2]));
+    this.camControls.saveState();
+    this.initial_camera_position = this.camera.position.clone();
+    this.initial_camera_target = this.camControls.target.clone();
+
+    // Load GUI settings
+    let gui_settings = state.G;
+    if (gui_settings)
+    {
+        this.showGUI(gui_settings.visible);
+    }
+
+    // Load editor state
+    this.editor.setValue(state.E.code);
+
+    // Load renderer state
+    this.renderer.settings = Object.assign(this.renderer.settings, state.R);
+
+    // Load solver state
+    this.solver.settings = Object.assign(this.solver.settings, state.S);
+
     // Initialize camera
-    let domain = this.solver.getDomain();   
+    let domain = this.solver.getDomain();
     let min     = domain.boundsMin;
     let max     = domain.boundsMax;
     let center  = domain.boundsCenter;
@@ -177,28 +321,103 @@ Trinity.prototype.init = function()
                              center[1]+relDist[1]*extents[1], 
                              center[2]+relDist[2]*extents[2]);
     this.camControls.target.set(center[0], center[1], center[2]);
+
+    // Sync logic
+    this.camControls.update();
+    this.gui.refresh();
 }
 
+///////////////////////////////////////////////////////////////
+// user code management
+///////////////////////////////////////////////////////////////
 
-// Renderer reset on camera or other parameters update
-Trinity.prototype.reset = function()
+Trinity.prototype.getGlsl = function()
 {
-    if (!this.initialized || this.terminated) return;
-    this.solver.reset();
-    this.renderer.reset();
+    return this.code;
 }
-   
+
+Trinity.prototype.show_errors = function()
+{
+    $(this.error_editor.getWrapperElement()).show();
+}
+
+Trinity.prototype.hide_errors = function()
+{
+    $(this.error_editor.getWrapperElement()).hide();
+}
+
+Trinity.prototype.compile_error = function(shaderName, shaderTypeStr, error_log)
+{
+    this.show_errors();
+
+    this.error_editor.setValue('');
+    this.error_editor.clearHistory();
+
+    errStr = '';
+    prefix = '';
+    if (shaderName != 'trace')
+        prefix = "[" + shaderName + " " + shaderTypeStr + " shader]";
+
+    const errorRE = /\d+:(\d+):/;
+    error_log.split('\n').forEach( function(error, ndx) {
+        const m = errorRE.exec(error);
+        if (m)
+        {
+            const traceShaderLineStart = 41;
+            let lineNum = Math.max(m ? parseInt(m[1]) : 0, 0) - traceShaderLineStart;
+            error = error.replace(errorRE, "");
+            error = error.replace('ERROR:', "");
+            error = error.trim();
+            if (error)
+                errStr += prefix + '\t→ Error on line ' + lineNum + ': ' + error + '\n';
+        }
+    });
+
+    this.error_editor.setValue(errStr);
+}
+
+Trinity.prototype.link_error = function(program_info, error_log)
+{
+    console.log("Link error: ");
+    console.log("\t\tprogram_info: ", program_info);
+    console.log("\t\terror_log: ", error_log);
+}
+
+
+///////////////////////////////////////////////////////////////
+// Simulation controls
+///////////////////////////////////////////////////////////////
+
+Trinity.prototype.pauseSimToggle = function()
+{
+    this.solver.pauseToggle();
+}
+
+Trinity.prototype.restartSim = function()
+{
+    this.solver.restart();
+}
 
 // Timestep the simulation
 Trinity.prototype.step = function()
 {
+    //console.warn("[Trinity] Trinity.prototype.step");
+
+    // @todo: more general update logic:
+    //   - if simulation is active, run timestep if sufficient wall-clock time has elapsed
+    //   - otherwise, just manage UI
+
     // Run a simulation timestep
     this.solver.step();
-    
-    // Volume render simulation 
+
+    // @todo: only render if display is dirty due to:
+    //    - timestep increased
+    //    - simulation restarted since last render
+    //    - a renderer parameter changed
+
+    // Volume render simulation
     this.renderer.render(this.solver);
 }
-
 
 Trinity.prototype._resize = function(width, height)
 {
@@ -213,31 +432,50 @@ Trinity.prototype._resize = function(width, height)
 
     var text_canvas = this.text_canvas;
     text_canvas.width  = width;
-    text_canvas.height = height
+    text_canvas.height = height;
+    text_canvas.style.width = width;
+    text_canvas.style.height = height;
 
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.camControls.update();
 
-
+    this.renderer.resize(width, height);
 }
 
 Trinity.prototype.resize = function()
 {
-
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    this._resize(width, height);
 }
-
 
 Trinity.prototype.onClick = function(event)
 {
-    
+    event.preventDefault();
 }
 
 Trinity.prototype.onDocumentMouseMove = function(event)
 {
+    let u = event.clientX/window.innerWidth;
+    let v = event.clientY/window.innerHeight;
 
+    // check not within editor region
+    var cmEl = document.querySelector('.CodeMirror');
+    var edRect = cmEl.getBoundingClientRect();
+    if (event.clientX >= edRect.left && event.clientX <= edRect.right &&
+        event.clientY >= edRect.top  && event.clientY <= edRect.bottom)
+    {
+        //this.disable_reset = true;
+        this.camControls.reset();
+        this.camControls.update();
+        //this.disable_reset = false;
+        this.camControls.enabled = false;
+        return;
+    }
 
     this.camControls.update();
+    this.camControls.saveState();
 }
 
 Trinity.prototype.onDocumentMouseDown = function(event)
@@ -248,6 +486,7 @@ Trinity.prototype.onDocumentMouseDown = function(event)
 Trinity.prototype.onDocumentMouseUp = function(event)
 {
     this.camControls.update();
+    event.preventDefault();
 }
 
 Trinity.prototype.onDocumentRightClick = function(event)
@@ -269,31 +508,27 @@ Trinity.prototype.onkeydown = function(event)
 
         case 72: // H key: toggle hide/show dat gui
             this.guiVisible = !this.guiVisible;
-            gravy.getGUI().toggleHide();
+            trinity.getGUI().toggleHide();
             break;
-        
-        case 79: // O key: output scene settings code to console
-            let code = this.dumpScene();
-            console.log(code);
+
+        case 79: // O key: dump JSON state to console
+            if (!this.camControls.enabled || trinity.editing) break;
+            let state = this.get_state();
+            let objJsonStr = this.get_escaped_stringified_state(state);
+            console.log(objJsonStr);
             break;
+
+        case 32: // space bar: pause toggle
+            this.pauseSimToggle();
+            break;
+
+        case 13: // enter key: restart sim from t=0
+            this.restartSim();
+            break;
+
     }
 }
 
 
 
-// Renderer reset on camera or other parameters update
-Trinity.prototype.reset = function(no_recompile = false)
-{
-    if (!this.initialized || this.terminated) return;
 
-    this.renderer.reset(no_recompile);
-}
-
-function camChanged()
-{
-    if (!trinity.rendering)
-    {
-        var no_recompile = true;
-        trinity.reset(no_recompile);
-    }
-}

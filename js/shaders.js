@@ -38,9 +38,9 @@ layout(location = 1) out vec4 Pair_output;
 layout(location = 2) out vec4 Tair_output;
 layout(location = 3) out vec4 debris_output;
 
-///////////////////////////////////////////////////////////////////////////////////
-// user code
-///////////////////////////////////////////////////////////////////////////////////
+/////////////////////// user-defined code ///////////////////////
+_USER_CODE_
+/////////////////////// user-defined code ///////////////////////
 
 struct LocalData
 {
@@ -50,19 +50,11 @@ struct LocalData
     float debris; // debris density
 };
 
-bool isSolid(in vec3 wsP, // world space point of current voxel
-             in vec3 L)   // world-space extents of grid (also the upper right corner in world spa
+float adjustedTemperature(in vec3 wsP,             // world space point of current voxel
+                          in LocalData local_data, // local quantities of current voxel
+                          in vec3 L)               // world-space extents of grid
 {
-    // define regions which are solid (static) obstacles
-    vec3 C = L/2.0;
-    float r = length(wsP - C);
-    return r <= L.x/2.5;
-}
-
-float thermalEffects(in vec3 wsP,             // world space point of current voxel
-                     in LocalData local_data, // local quantities of current voxel
-                     in vec3 L)               // world-space extents of grid (also the upper right corner in world space)
-{
+    // Modify current temperature to account for e.g. radiation loss
     // @todo: Tambient and radiationLoss will be defined in user code:
     //      T0        = reference temperature for buoyancy
     //      Tambient  = temperature which generates buoyancy which balances gravity
@@ -73,7 +65,7 @@ float thermalEffects(in vec3 wsP,             // world space point of current vo
 
 vec3 externalForces(in vec3 wsP,             // world space point of current voxel
                     in LocalData local_data, // local quantities of current voxel
-                    in vec3 L)               // world-space extents of grid (also the upper right corner in world space)
+                    in vec3 L)               // world-space extents of grid
 {
     // @todo: gravity, buoyancy and T0 will be defined in user code
     float buoyancy_force = -gravity + gravity*buoyancy*(local_data.T - T0);
@@ -136,27 +128,27 @@ vec4 interp(in sampler2D S, in vec3 wsP)
     return flo*Slo + fhi*Shi;
 }
 
-vec3 clampToBounds(in vec3 wsX)
+vec3 clampToBounds(in vec3 wsP)
 {
     vec3 halfVoxel = vec3(0.5*dL);
-    return clamp(wsX, halfVoxel, L-halfVoxel);
+    return clamp(wsP, halfVoxel, L-halfVoxel);
 }
 
-vec3 back_advect(in vec3 wsX, in vec3 vX, float h)
+vec3 back_advect(in vec3 wsP, in vec3 vX, float h)
 {
-    // RK4 integration for position wsX advected backwards through time h:
+    // RK4 integration for position wsP advected backwards through time h:
     vec3 k1 = vX;
-    vec3 k2 = interp(Vair_sampler, clampToBounds(wsX - 0.5*h*k1)).xyz;
-    vec3 k3 = interp(Vair_sampler, clampToBounds(wsX - 0.5*h*k2)).xyz;
-    vec3 k4 = interp(Vair_sampler, clampToBounds(wsX -     h*k3)).xyz;
-    return clampToBounds(wsX - h*(k1 + 2.0*k2 + 2.0*k3 + k4)/6.0);
+    vec3 k2 = interp(Vair_sampler, clampToBounds(wsP - 0.5*h*k1)).xyz;
+    vec3 k3 = interp(Vair_sampler, clampToBounds(wsP - 0.5*h*k2)).xyz;
+    vec3 k4 = interp(Vair_sampler, clampToBounds(wsP -     h*k3)).xyz;
+    return clampToBounds(wsP - h*(k1 + 2.0*k2 + 2.0*k3 + k4)/6.0);
 }
 
-vec3 vorticityConfinementForce(ivec2 frag, in ivec3 vsXi)
+vec3 vorticityConfinementForce(ivec2 frag, in ivec3 vsPi)
 {
-    int ix = vsXi.x;
-    int iy = vsXi.y;
-    int iz = vsXi.z;
+    int ix = vsPi.x;
+    int iy = vsPi.y;
+    int iz = vsPi.z;
     ivec3 X_ip = ivec3(min(ix+1, Nx-1), iy, iz);
     ivec3 X_in = ivec3(max(ix-1,    0), iy, iz);
     ivec3 X_jp = ivec3(ix, min(iy+1, Ny-1), iz);
@@ -189,10 +181,10 @@ void main()
 {
     // fragment range over [N*N, N] space
     ivec2 frag = ivec2(gl_FragCoord.xy);
-    vec3 vsX = mapFragToVs(frag);
-    ivec3 vsXi = ivec3(floor(vsX));
+    vec3 vsP = mapFragToVs(frag);
+    ivec3 vsPi = ivec3(floor(vsP));
 
-    if (isSolidCell(vsXi))
+    if (isSolidCell(vsPi))
     {
         Vair_output   = texelFetch(Vair_sampler, frag, 0);
         Pair_output   = texelFetch(Pair_sampler, frag, 0);
@@ -203,12 +195,12 @@ void main()
     {
         // Apply semi-Lagrangian advection
         vec3 v0 = texelFetch(Vair_sampler, frag, 0).xyz;
-        vec3 wsX = vsX*dL;
-        vec3 wsXp = back_advect(wsX, v0, timestep);
-        vec3  v      = interp(Vair_sampler, wsXp).rgb;
-        float P      = interp(Pair_sampler, wsXp).x;
-        float T      = interp(Tair_sampler, wsXp).x;
-        float debris = interp(debris_sampler, wsXp).x;
+        vec3 wsP = vsP*dL;
+        vec3 wsPp = back_advect(wsP, v0, timestep);
+        vec3  v      = interp(Vair_sampler, wsPp).rgb;
+        float P      = interp(Pair_sampler, wsPp).x;
+        float T      = interp(Tair_sampler, wsPp).x;
+        float debris = interp(debris_sampler, wsPp).x;
 
         LocalData local_data;
         local_data.v = v;
@@ -216,15 +208,15 @@ void main()
         local_data.T = T;
         local_data.debris = debris;
 
-        // Adjust temperature due to thermal physics
-        T = thermalEffects(wsX, local_data, L);
-
         // Apply external forces
-        v += timestep * externalForces(wsX, local_data, L);
+        v += timestep * externalForces(wsP, local_data, L);
 
         // Apply vorticity confinement:
         // @todo (only if vorticity confinement enabled)
-        v += timestep * vorticityConfinementForce(frag, vsXi);
+        v += timestep * vorticityConfinementForce(frag, vsPi);
+
+        // Adjust temperature due to any additional physics
+        T = adjustedTemperature(wsP, local_data, L);
 
         Vair_output   = vec4(v, 0.0);
         Pair_output   = vec4(P);
@@ -278,6 +270,102 @@ void main()
 }
 `,
 
+'debris-fragment-shader': `#version 300 es
+precision highp float;
+
+// Geometry
+uniform int Nx;
+uniform int Ny;
+uniform int Nz;
+uniform int Ncol;
+uniform int W;
+uniform int H;
+uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
+uniform float dL;
+
+// Physics
+uniform float timestep;
+
+in vec2 v_texcoord;
+
+/////// input buffers ///////
+uniform sampler2D debris_sampler; // 0, float debris density field
+uniform sampler2D Vair_sampler;   // 1, vec3 velocity field
+
+/////// output buffers ///////
+layout(location = 0) out vec4 debris_output;
+
+vec3 mapFragToVs(in ivec2 frag)
+{
+    // map fragment coord in [W, H] to continuous position of corresponding voxel center in voxel space
+    int iu = frag.x;
+    int iv = frag.y;
+    int row = int(floor(float(iv)/float(Nz)));
+    int col = int(floor(float(iu)/float(Nx)));
+    int i = iu - col*Nx;
+    int j = col + row*Ncol;
+    int k = iv - row*Nz;
+    return vec3(ivec3(i, j, k)) + vec3(0.5);
+}
+
+vec2 slicetoUV(int j, vec3 vsP)
+{
+    // Given y-slice index j, and continuous voxel space xz-location,
+    // return corresponding continuous frag UV for interpolation within this slice
+    int row = int(floor(float(j)/float(Ncol)));
+    int col = j - row*Ncol;
+    vec2 uv_ll = vec2(float(col*Nx)/float(W), float(row*Nz)/float(H));
+    float du = vsP.x/float(W);
+    float dv = vsP.z/float(H);
+    return uv_ll + vec2(du, dv);
+}
+
+vec4 interp(in sampler2D S, in vec3 wsP)
+{
+    vec3 vsP = wsP / dL;
+    float pY = vsP.y - 0.5;
+    int jlo = clamp(int(floor(pY)), 0, Ny-1); // lower j-slice
+    int jhi = clamp(         jlo+1, 0, Ny-1); // upper j-slice
+    float flo = float(jhi) - pY;              // lower j fraction
+    float fhi = 1.0 - flo;                    // upper j fraction
+    vec2 uv_lo = slicetoUV(jlo, vsP);
+    vec2 uv_hi = slicetoUV(jhi, vsP);
+    vec4 Slo = texture(S, uv_lo);
+    vec4 Shi = texture(S, uv_hi);
+    return flo*Slo + fhi*Shi;
+}
+
+vec3 clampToBounds(in vec3 wsX)
+{
+    vec3 halfVoxel = vec3(0.5*dL);
+    return clamp(wsX, halfVoxel, L-halfVoxel);
+}
+
+vec3 back_advect(in vec3 wsX, in vec3 vX, float h)
+{
+    // RK4 integration for position wsX advected backwards through time h:
+    vec3 k1 = vX;
+    vec3 k2 = interp(Vair_sampler, clampToBounds(wsX - 0.5*h*k1)).xyz;
+    vec3 k3 = interp(Vair_sampler, clampToBounds(wsX - 0.5*h*k2)).xyz;
+    vec3 k4 = interp(Vair_sampler, clampToBounds(wsX -     h*k3)).xyz;
+    return clampToBounds(wsX - h*(k1 + 2.0*k2 + 2.0*k3 + k4)/6.0);
+}
+
+void main()
+{
+    // fragment range over [N*N, N] space
+    ivec2 frag = ivec2(gl_FragCoord.xy);
+    vec3 vsP = mapFragToVs(frag);
+    vec3 wsP = vsP*dL;
+
+    // Apply semi-Lagrangian advection
+    vec3 v0 = texelFetch(Vair_sampler, frag, 0).rgb;
+    vec3 wsPp = back_advect(wsP, v0, timestep);
+    vec3 debris_p = interp(debris_sampler, wsPp).rgb;
+    debris_output = vec4(debris_p, 1.0);
+}
+`,
+
 'div-fragment-shader': `#version 300 es
 precision highp float;
 
@@ -295,6 +383,9 @@ uniform sampler2D Vair_sampler; // 0, vec3 velocity field
 /////// output buffers ///////
 layout(location = 0) out vec4 divVair_output;
 
+/////////////////////// user-defined code ///////////////////////
+_USER_CODE_
+/////////////////////// user-defined code ///////////////////////
 
 vec3 mapFragToVs(in ivec2 frag)
 {
@@ -320,15 +411,6 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     int iu = col*Nx + i;
     int iv = row*Nz + k;
     return ivec2(iu, iv);
-}
-
-bool isSolid(in vec3 wsP, // world space point of current voxel
-             in vec3 L)   // world-space extents of grid (also the upper right corner in world spa
-{
-    // define regions which are solid (static) obstacles
-    vec3 C = L/2.0;
-    float r = length(wsP - C);
-    return r <= L.x/2.5;
 }
 
 bool isSolidCell(in ivec3 vsPi)
@@ -375,6 +457,253 @@ void main()
 `,
 
 'div-vertex-shader': `#version 300 es
+precision highp float;
+
+in vec3 Position;
+in vec2 TexCoord;
+
+void main() 
+{
+    gl_Position = vec4(Position, 1.0);
+}
+`,
+
+'initial-fragment-shader': `#version 300 es
+precision highp float;
+
+// Geometry
+uniform int Nx;
+uniform int Ny;
+uniform int Nz;
+uniform int Ncol;
+uniform int W;
+uniform int H;
+uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
+uniform float dL;
+
+/////// output buffers ///////
+layout(location = 0) out vec4 Vair_output;
+layout(location = 1) out vec4 Pair_output;
+layout(location = 2) out vec4 Tair_output;
+layout(location = 3) out vec4 debris_output;
+
+/////////////////////// user-defined code ///////////////////////
+_USER_CODE_
+/////////////////////// user-defined code ///////////////////////
+
+vec3 blast_center;
+float blast_radius;
+float blast_velocity;
+float blast_temperature_contrast;
+float T_ambient;
+vec3 debris_density;
+vec3 debris_albedo;
+
+// Specify velocity, temperature, and debris density/albedo at time=0
+void initial_conditions(in vec3 wsP,                // world space point of current voxel
+                        in vec3 L,                  // world-space extents of grid
+                        inout vec3 velocity,        // initial velocity
+                        inout float temperature,    // initial temperature
+                        inout vec3 density,         // initial per-channel debris extinction
+                        inout vec3 albedo)          // initial per-channel debris albedo
+{
+    velocity = vec3(0.0);
+
+    float T_ambient = 300.0;
+    temperature = T_ambient;
+
+    density = vec3(0.0);
+    albedo = vec3(0.0);
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////
+
+
+vec3 mapFragToVs(in ivec2 frag)
+{
+    // map fragment coord in [W, H] to continuous position of corresponding voxel center in voxel space
+    int iu = frag.x;
+    int iv = frag.y;
+    int row = int(floor(float(iv)/float(Nz)));
+    int col = int(floor(float(iu)/float(Nx)));
+    int i = iu - col*Nx;
+    int j = col + row*Ncol;
+    int k = iv - row*Nz;
+    return vec3(ivec3(i, j, k)) + vec3(0.5);
+}
+
+void main()
+{
+    // fragment range over [N*N, N] space
+    ivec2 frag = ivec2(gl_FragCoord.xy);
+    vec3 vsP = mapFragToVs(frag);
+    ivec3 vsPi = ivec3(floor(vsP));
+    vec3 wsP = vsP*dL;
+
+    vec3 v;
+    float T;
+    vec3 E; // debris extinction
+    vec3 A; // debris albedo
+    initial_conditions(wsP, L,
+                       v, T, E, A);
+
+    Vair_output   = vec4(v, 0.0);
+    Pair_output   = vec4(0.0);
+    Tair_output   = vec4(T);
+    debris_output = vec4(E, 0.0);
+}
+`,
+
+'initial-vertex-shader': `#version 300 es
+precision highp float;
+
+in vec3 Position;
+in vec2 TexCoord;
+
+void main() 
+{
+    gl_Position = vec4(Position, 1.0);
+}
+`,
+
+'inject-fragment-shader': `#version 300 es
+precision highp float;
+
+// Geometry
+uniform int Nx;
+uniform int Ny;
+uniform int Nz;
+uniform int Ncol;
+uniform int W;
+uniform int H;
+uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
+uniform float dL;
+
+// Physics
+uniform float time;
+
+/////// input buffers ///////
+uniform sampler2D Vair_sampler;      // 0, vec3 air velocity field
+uniform sampler2D Tair_sampler;      // 2, float air temperature field
+uniform sampler2D debris_sampler;    // 3, float debris density field
+
+/////// output buffers ///////
+layout(location = 0) out vec4 Vair_output;
+layout(location = 1) out vec4 Tair_output;
+layout(location = 2) out vec4 debris_output;
+
+/////////////////////// user-defined code ///////////////////////
+_USER_CODE_
+/////////////////////// user-defined code ///////////////////////
+
+float Tambient;                     // {"label":"Tambient",                   "min":0.0, "max":1000.0, "step":0.01, "default":300.0}
+float blast_height;                 // {"label":"blast_height",               "min":0.0, "max":1.0,    "step":0.01, "default":0.25}
+float blast_radius;                 // {"label":"blast_radius",               "min":0.0, "max":1.0,    "step":0.01, "default":0.1}
+float blast_velocity;               // {"label":"blast_velocity",             "min":0.0, "max":100.0,  "step":0.01, "default":50.0}
+float blast_temperature_contrast;   // {"label":"blast_temperature_contrast", "min":0.0, "max":1000.0, "step":0.01, "default":100.0}
+float debris_inflow_rate;           // {"label":"debris_inflow_rate",         "min":0.0, "max":10.0,   "step":0.01, "default":1.0}
+vec3 debris_albedo;                 // {"label":"debris_albedo",              "default":[0.5, 0.5, 0.5], "scale":1.0}
+
+void init(in vec3 wsP,   // world space point of current voxel
+          in float time, // time in units of frames
+          in vec3 L)     // world-space extents of grid
+{
+    Tambient = 300.0;
+    blast_height = 0.2;
+    blast_radius = 0.05;
+    blast_velocity = 5.0;
+    blast_temperature_contrast = 100.0;
+    debris_inflow_rate = 1.0;
+    debris_albedo = vec3(0.5, 0.5, 0.5);
+}
+
+void inject(in vec3 wsP,        // world space point of current voxel
+            in float time,      // time in units of frames
+            in vec3 L,          // world-space extents of grid
+            inout vec3 dv,      // injected velocity in voxels/frame (defaults to 0)
+            inout float T,      // temperature updated in-place for heating/cooling (no update by default)
+            inout vec3 drho,    // injected per-channel debris extinction (defaults to 0)
+            inout vec3 albedo)  // albedo of the injected debris (defaults to grey)
+{
+    vec3 blast_center = vec3(0.5*L.x, blast_height*L.y, 0.5*L.z);
+    vec3 dir = wsP - blast_center;
+    float r = length(dir);
+    dir /= r;
+    float rt = r/(blast_radius*L.y);
+    if (rt <= 1.0)
+    {
+        // Within blast radius: add velocity and set temperature
+        float radial_falloff = max(0.0, 1.0 - rt*rt*(3.0 - 2.0*rt));
+        dv = dir * blast_velocity * radial_falloff;
+        T = Tambient * (1.0 + blast_temperature_contrast*radial_falloff);
+        drho = vec3(1.0) * debris_inflow_rate * radial_falloff;
+        albedo = debris_albedo;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+
+bool isSolidCell(in ivec3 vsPi)
+{
+    vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
+    vec3 wsP = vsP*dL;
+    return isSolid(wsP, L);
+}
+
+vec3 mapFragToVs(in ivec2 frag)
+{
+    // map fragment coord in [W, H] to continuous position of corresponding voxel center in voxel space
+    int iu = frag.x;
+    int iv = frag.y;
+    int row = int(floor(float(iv)/float(Nz)));
+    int col = int(floor(float(iu)/float(Nx)));
+    int i = iu - col*Nx;
+    int j = col + row*Ncol;
+    int k = iv - row*Nz;
+    return vec3(ivec3(i, j, k)) + vec3(0.5);
+}
+
+void main()
+{
+    // fragment range over [N*N, N] space
+    ivec2 frag = ivec2(gl_FragCoord.xy);
+    vec3 vsP = mapFragToVs(frag);
+    ivec3 vsPi = ivec3(floor(vsP));
+    vec3 wsP = vsP*dL;
+
+    if (isSolidCell(vsPi))
+    {
+        Vair_output   = texelFetch(Vair_sampler, frag, 0);
+        Tair_output   = texelFetch(Tair_sampler, frag, 0);
+        debris_output = texelFetch(debris_sampler, frag, 0);
+    }
+    else
+    {
+        // Get current velocity, temperature, and debris fields:
+        vec3  v = texelFetch(Vair_sampler, frag, 0).rgb;
+        float T = texelFetch(Tair_sampler, frag, 0).x;
+        float E = texelFetch(debris_sampler, frag, 0).x;
+
+        init(wsP, time, L); // @todo: will remove once uniform binding done
+
+        // Inject mass and modify temperature:
+        vec3 dv;
+        vec3 drho, albedo;
+        inject(wsP, time, L,
+               dv, T, drho, albedo);
+
+        v += dv;
+        E += drho.r; // @todo: mix injected debris extinction/albedo into current medium of voxel
+
+        Vair_output   = vec4(v, 0.0);
+        Tair_output   = vec4(T);
+        debris_output = vec4(E);
+    }
+}
+`,
+
+'inject-vertex-shader': `#version 300 es
 precision highp float;
 
 in vec3 Position;
@@ -435,6 +764,9 @@ uniform sampler2D divVair_sampler; // 2, float divergence field
 /////// output buffers ///////
 layout(location = 0) out vec4 Pair_output;
 
+/////////////////////// user-defined code ///////////////////////
+_USER_CODE_
+/////////////////////// user-defined code ///////////////////////
 
 vec3 mapFragToVs(in ivec2 frag)
 {
@@ -460,15 +792,6 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     int iu = col*Nx + i;
     int iv = row*Nz + k;
     return ivec2(iu, iv);
-}
-
-bool isSolid(in vec3 wsP, // world space point of current voxel
-             in vec3 L)   // world-space extents of grid (also the upper right corner in world spa
-{
-    // define regions which are solid (static) obstacles
-    vec3 C = L/2.0;
-    float r = length(wsP - C);
-    return r <= L.x/2.5;
 }
 
 bool isSolidCell(in ivec3 vsPi)
@@ -675,14 +998,7 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     return ivec2(iu, iv);
 }
 
-bool isSolid(in vec3 wsP, // world space point of current voxel
-             in vec3 L)   // world-space extents of grid (also the upper right corner in world spa
-{
-    // define regions which are solid (static) obstacles
-    vec3 C = L/2.0;
-    float r = length(wsP - C);
-    return r <= L.x/2.5;
-}
+_USER_CODE_
 
 bool isSolidCell(in ivec3 vsPi)
 {

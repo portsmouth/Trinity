@@ -35,9 +35,9 @@ layout(location = 1) out vec4 Pair_output;
 layout(location = 2) out vec4 Tair_output;
 layout(location = 3) out vec4 debris_output;
 
-///////////////////////////////////////////////////////////////////////////////////
-// user code
-///////////////////////////////////////////////////////////////////////////////////
+/////////////////////// user-defined code ///////////////////////
+_USER_CODE_
+/////////////////////// user-defined code ///////////////////////
 
 struct LocalData
 {
@@ -47,19 +47,11 @@ struct LocalData
     float debris; // debris density
 };
 
-bool isSolid(in vec3 wsP, // world space point of current voxel
-             in vec3 L)   // world-space extents of grid (also the upper right corner in world spa
+float adjustedTemperature(in vec3 wsP,             // world space point of current voxel
+                          in LocalData local_data, // local quantities of current voxel
+                          in vec3 L)               // world-space extents of grid
 {
-    // define regions which are solid (static) obstacles
-    vec3 C = L/2.0;
-    float r = length(wsP - C);
-    return r <= L.x/2.5;
-}
-
-float thermalEffects(in vec3 wsP,             // world space point of current voxel
-                     in LocalData local_data, // local quantities of current voxel
-                     in vec3 L)               // world-space extents of grid (also the upper right corner in world space)
-{
+    // Modify current temperature to account for e.g. radiation loss
     // @todo: Tambient and radiationLoss will be defined in user code:
     //      T0        = reference temperature for buoyancy
     //      Tambient  = temperature which generates buoyancy which balances gravity
@@ -70,7 +62,7 @@ float thermalEffects(in vec3 wsP,             // world space point of current vo
 
 vec3 externalForces(in vec3 wsP,             // world space point of current voxel
                     in LocalData local_data, // local quantities of current voxel
-                    in vec3 L)               // world-space extents of grid (also the upper right corner in world space)
+                    in vec3 L)               // world-space extents of grid
 {
     // @todo: gravity, buoyancy and T0 will be defined in user code
     float buoyancy_force = -gravity + gravity*buoyancy*(local_data.T - T0);
@@ -133,27 +125,27 @@ vec4 interp(in sampler2D S, in vec3 wsP)
     return flo*Slo + fhi*Shi;
 }
 
-vec3 clampToBounds(in vec3 wsX)
+vec3 clampToBounds(in vec3 wsP)
 {
     vec3 halfVoxel = vec3(0.5*dL);
-    return clamp(wsX, halfVoxel, L-halfVoxel);
+    return clamp(wsP, halfVoxel, L-halfVoxel);
 }
 
-vec3 back_advect(in vec3 wsX, in vec3 vX, float h)
+vec3 back_advect(in vec3 wsP, in vec3 vX, float h)
 {
-    // RK4 integration for position wsX advected backwards through time h:
+    // RK4 integration for position wsP advected backwards through time h:
     vec3 k1 = vX;
-    vec3 k2 = interp(Vair_sampler, clampToBounds(wsX - 0.5*h*k1)).xyz;
-    vec3 k3 = interp(Vair_sampler, clampToBounds(wsX - 0.5*h*k2)).xyz;
-    vec3 k4 = interp(Vair_sampler, clampToBounds(wsX -     h*k3)).xyz;
-    return clampToBounds(wsX - h*(k1 + 2.0*k2 + 2.0*k3 + k4)/6.0);
+    vec3 k2 = interp(Vair_sampler, clampToBounds(wsP - 0.5*h*k1)).xyz;
+    vec3 k3 = interp(Vair_sampler, clampToBounds(wsP - 0.5*h*k2)).xyz;
+    vec3 k4 = interp(Vair_sampler, clampToBounds(wsP -     h*k3)).xyz;
+    return clampToBounds(wsP - h*(k1 + 2.0*k2 + 2.0*k3 + k4)/6.0);
 }
 
-vec3 vorticityConfinementForce(ivec2 frag, in ivec3 vsXi)
+vec3 vorticityConfinementForce(ivec2 frag, in ivec3 vsPi)
 {
-    int ix = vsXi.x;
-    int iy = vsXi.y;
-    int iz = vsXi.z;
+    int ix = vsPi.x;
+    int iy = vsPi.y;
+    int iz = vsPi.z;
     ivec3 X_ip = ivec3(min(ix+1, Nx-1), iy, iz);
     ivec3 X_in = ivec3(max(ix-1,    0), iy, iz);
     ivec3 X_jp = ivec3(ix, min(iy+1, Ny-1), iz);
@@ -186,10 +178,10 @@ void main()
 {
     // fragment range over [N*N, N] space
     ivec2 frag = ivec2(gl_FragCoord.xy);
-    vec3 vsX = mapFragToVs(frag);
-    ivec3 vsXi = ivec3(floor(vsX));
+    vec3 vsP = mapFragToVs(frag);
+    ivec3 vsPi = ivec3(floor(vsP));
 
-    if (isSolidCell(vsXi))
+    if (isSolidCell(vsPi))
     {
         Vair_output   = texelFetch(Vair_sampler, frag, 0);
         Pair_output   = texelFetch(Pair_sampler, frag, 0);
@@ -200,12 +192,12 @@ void main()
     {
         // Apply semi-Lagrangian advection
         vec3 v0 = texelFetch(Vair_sampler, frag, 0).xyz;
-        vec3 wsX = vsX*dL;
-        vec3 wsXp = back_advect(wsX, v0, timestep);
-        vec3  v      = interp(Vair_sampler, wsXp).rgb;
-        float P      = interp(Pair_sampler, wsXp).x;
-        float T      = interp(Tair_sampler, wsXp).x;
-        float debris = interp(debris_sampler, wsXp).x;
+        vec3 wsP = vsP*dL;
+        vec3 wsPp = back_advect(wsP, v0, timestep);
+        vec3  v      = interp(Vair_sampler, wsPp).rgb;
+        float P      = interp(Pair_sampler, wsPp).x;
+        float T      = interp(Tair_sampler, wsPp).x;
+        float debris = interp(debris_sampler, wsPp).x;
 
         LocalData local_data;
         local_data.v = v;
@@ -213,15 +205,15 @@ void main()
         local_data.T = T;
         local_data.debris = debris;
 
-        // Adjust temperature due to thermal physics
-        T = thermalEffects(wsX, local_data, L);
-
         // Apply external forces
-        v += timestep * externalForces(wsX, local_data, L);
+        v += timestep * externalForces(wsP, local_data, L);
 
         // Apply vorticity confinement:
         // @todo (only if vorticity confinement enabled)
-        v += timestep * vorticityConfinementForce(frag, vsXi);
+        v += timestep * vorticityConfinementForce(frag, vsPi);
+
+        // Adjust temperature due to any additional physics
+        T = adjustedTemperature(wsP, local_data, L);
 
         Vair_output   = vec4(v, 0.0);
         Pair_output   = vec4(P);
