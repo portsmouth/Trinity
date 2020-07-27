@@ -15,6 +15,16 @@ var Trinity = function(editor, error_editor)
     this.error_editor = error_editor;
     $(this.error_editor.getWrapperElement()).hide();
 
+    this.editor_docs = {};
+    this.editor_docs['common']  = CodeMirror.Doc('', "x-shader/x-fragment");
+    this.editor_docs['initial'] = CodeMirror.Doc('', "x-shader/x-fragment");
+    this.editor_docs['inject']  = CodeMirror.Doc('', "x-shader/x-fragment");
+    this.editor_docs['advect']  = CodeMirror.Doc('', "x-shader/x-fragment");
+    this.editor_docs['collide'] = CodeMirror.Doc('', "x-shader/x-fragment");
+
+    var doc = this.editor_docs['initial'];
+    this.editor.swapDoc(doc);
+
     let container = document.getElementById("container");
     this.container = container;
 
@@ -50,9 +60,6 @@ var Trinity = function(editor, error_editor)
     this.camControls.flySpeed = 0.01;
     this.disable_reset = false;
     //this.camControls.addEventListener('change', function() {
-    //                                                        if (trinity.disable_reset) return;
-    //                                                        var no_recompile = true;
-    //                                                        trinity.reset(no_recompile);
     //                                                    });
     this.camControls.keyPanSpeed = 100.0;
 
@@ -79,12 +86,14 @@ var Trinity = function(editor, error_editor)
     this.gui = new GUI(this.guiVisible);
 
     // Setup codemirror events:
+    let TRINITY = this;
     let SOLVER = this.solver;
     this.editor.on("change", function(cm, n) {
-        trinity.code = cm.getValue();
-        SOLVER.updateShaders();
+        if (!TRINITY.loading)
+            SOLVER.updateShaders();
     });
     this.editing = false;
+    this.loading = false;
 
     // Setup keypress and mouse events
     window.addEventListener( 'mousemove', this, false );
@@ -100,8 +109,13 @@ var Trinity = function(editor, error_editor)
         this.presets.load_preset('Basic plume');
     }
 
-    // Do initial resize:
+    // Do initial window resize:
     this.resize();
+
+    // Do initial shader compilation (and start solver)
+    SOLVER.updateShaders();
+    SOLVER.restart();
+
 }
 
 /**
@@ -251,13 +265,21 @@ Trinity.prototype.get_state = function()
                             near: this.camera.near,
                             far:  this.camera.far
     };
-    let editor_settings = { code: this.code } ;
+
+    let editor_settings = {
+        common_glsl:  trinity.getGlsl('common'),
+        initial_glsl: trinity.getGlsl('initial'),
+        inject_glsl:  trinity.getGlsl('inject'),
+        advect_glsl:  trinity.getGlsl('advect'),
+        collide_glsl: trinity.getGlsl('collide')
+    };
+
     let gui_settings = { visible: this.getGUI().visible };
     let state = { R: this.renderer.settings,
                   S: this.solver.settings,
                   C: camera_settings,
                   G: gui_settings,
-                  E: editor_settings};
+                  E: editor_settings };
 
     return state;
 }
@@ -278,6 +300,8 @@ Trinity.prototype.load_url = function(url)
 
 Trinity.prototype.load_state = function(state)
 {
+    this.loading = true;
+
     // Load camera state
     let camera_settings = state.C;
     let P = camera_settings.pos;
@@ -300,26 +324,56 @@ Trinity.prototype.load_state = function(state)
     }
 
     // Load editor state
-    this.editor.setValue(state.E.code);
+    if (state.E.common_glsl  === undefined) state.E.common_glsl  = '';
+    if (state.E.initial_glsl === undefined) state.E.initial_glsl = '';
+    if (state.E.inject_glsl  === undefined) state.E.inject_glsl  = '';
+    if (state.E.advect_glsl  === undefined) state.E.advect_glsl  = '';
+    if (state.E.collide_glsl === undefined) state.E.collide_glsl = '';
+    trinity.getDoc('common').setValue(state.E.common_glsl);
+    trinity.getDoc('initial').setValue(state.E.initial_glsl);
+    trinity.getDoc('inject').setValue(state.E.inject_glsl);
+    trinity.getDoc('advect').setValue(state.E.advect_glsl);
+    trinity.getDoc('collide').setValue(state.E.collide_glsl);
 
     // Load renderer state
     this.renderer.settings = Object.assign(this.renderer.settings, state.R);
 
     // Load solver state
+    let Nx = state.S.Nx;
+    let Ny = state.S.Ny;
+    let Nz = state.S.Nz;
+    this.solver.resize(Nx, Ny, Nz);
     this.solver.settings = Object.assign(this.solver.settings, state.S);
 
     // Sync logic
     this.camControls.update();
     this.gui.refresh();
+
+    this.loading = false;
 }
 
 ///////////////////////////////////////////////////////////////
 // user code management
 ///////////////////////////////////////////////////////////////
 
-Trinity.prototype.getGlsl = function()
+
+Trinity.prototype.getDoc = function(program_name)
 {
-    return this.code;
+    if (program_name in this.editor_docs)
+    {
+        return this.editor_docs[program_name];
+    }
+    return null;
+}
+
+Trinity.prototype.getGlsl = function(program_name)
+{
+    if (program_name in this.editor_docs)
+    {
+        let doc = this.editor_docs[program_name];
+        return doc.getValue();
+    }
+    return '';
 }
 
 Trinity.prototype.show_errors = function()
@@ -359,6 +413,7 @@ Trinity.prototype.compile_error = function(shaderName, shaderTypeStr, error_log)
         }
     });
 
+    console.log(errStr);
     this.error_editor.setValue(errStr);
 }
 
@@ -497,10 +552,7 @@ Trinity.prototype.onDocumentMouseUp = function(event)
     event.preventDefault();
 }
 
-Trinity.prototype.onDocumentRightClick = function(event)
-{
-
-}
+Trinity.prototype.onDocumentRightClick = function(event) {}
 
 Trinity.prototype.onkeydown = function(event)
 {
@@ -515,6 +567,7 @@ Trinity.prototype.onkeydown = function(event)
             break;
 
         case 72: // H key: toggle hide/show dat gui
+        if (!this.camControls.enabled || trinity.editing) break;
             this.guiVisible = !this.guiVisible;
             trinity.getGUI().toggleHide();
             break;
@@ -527,15 +580,16 @@ Trinity.prototype.onkeydown = function(event)
             break;
 
         case 70: // F key: move cam to standard orientation
+            if (!this.camControls.enabled || trinity.editing) break;
             this.resetCam();
             break;
 
-
         case 32: // space bar: pause toggle
+            if (!this.camControls.enabled || trinity.editing) break;
             this.pauseSimToggle();
             break;
 
-        case 13: // enter key: restart sim from t=0
+        case 27: // escape key: restart sim from t=0
             this.restartSim();
             break;
 

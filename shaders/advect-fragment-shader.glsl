@@ -14,10 +14,6 @@ uniform float dL;
 uniform float time;
 uniform float timestep;
 uniform float vorticity_scale;
-uniform float buoyancy;         // @todo: move to user code
-uniform float gravity;          // @todo: move to user code
-uniform float radiationLoss;    // @todo: move to user code
-uniform float T0;               // @todo: move to user code
 
 in vec2 v_texcoord;
 
@@ -37,39 +33,6 @@ layout(location = 3) out vec4 debris_output;
 /////////////////////// user-defined code ///////////////////////
 _USER_CODE_
 /////////////////////// user-defined code ///////////////////////
-
-struct LocalData
-{
-    vec3 v;       // velocity
-    float P;      // pressure
-    float T;      // temperature
-    float debris; // debris density
-};
-
-float adjustedTemperature(in vec3 wsP,             // world space point of current voxel
-                          in LocalData local_data, // local quantities of current voxel
-                          in vec3 L)               // world-space extents of grid
-{
-    // Modify current temperature to account for e.g. radiation loss
-    // @todo: Tambient and radiationLoss will be defined in user code:
-    //      T0        = reference temperature for buoyancy
-    //      Tambient  = temperature which generates buoyancy which balances gravity
-    // Apply thermal relaxation to ambient temperature due to "radiation loss"
-    float dT = local_data.T - Tambient;
-    return Tambient + dT*exp(-radiationLoss);
-}
-
-vec3 externalForces(in vec3 wsP,             // world space point of current voxel
-                    in LocalData local_data, // local quantities of current voxel
-                    in vec3 L)               // world-space extents of grid
-{
-    // @todo: gravity, buoyancy and T0 will be defined in user code
-    float buoyancy_force = -gravity + gravity*buoyancy*(local_data.T - T0);
-    return vec3(0.0, buoyancy_force, 0.0);
-}
-
-///////////////////////////////////////////////////////////////////////////////////
-
 
 vec3 mapFragToVs(in ivec2 frag)
 {
@@ -175,6 +138,8 @@ bool isSolidCell(in ivec3 vsPi)
 
 void main()
 {
+    init();
+
     // fragment range over [N*N, N] space
     ivec2 frag = ivec2(gl_FragCoord.xy);
     vec3 vsP = mapFragToVs(frag);
@@ -198,21 +163,12 @@ void main()
         float T      = interp(Tair_sampler, wsPp).x;
         float debris = interp(debris_sampler, wsPp).x;
 
-        LocalData local_data;
-        local_data.v = v;
-        local_data.P = P;
-        local_data.T = T;
-        local_data.debris = debris;
-
         // Apply external forces
-        v += timestep * externalForces(wsP, local_data, L);
+        v += timestep * externalForces(wsP, v, P, T, L);
 
         // Apply vorticity confinement:
         // @todo (only if vorticity confinement enabled)
         v += timestep * vorticityConfinementForce(frag, vsPi);
-
-        // Adjust temperature due to any additional physics
-        T = adjustedTemperature(wsP, local_data, L);
 
         Vair_output   = vec4(v, 0.0);
         Pair_output   = vec4(P);

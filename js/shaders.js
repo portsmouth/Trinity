@@ -17,10 +17,6 @@ uniform float dL;
 uniform float time;
 uniform float timestep;
 uniform float vorticity_scale;
-uniform float buoyancy;         // @todo: move to user code
-uniform float gravity;          // @todo: move to user code
-uniform float radiationLoss;    // @todo: move to user code
-uniform float T0;               // @todo: move to user code
 
 in vec2 v_texcoord;
 
@@ -40,39 +36,6 @@ layout(location = 3) out vec4 debris_output;
 /////////////////////// user-defined code ///////////////////////
 _USER_CODE_
 /////////////////////// user-defined code ///////////////////////
-
-struct LocalData
-{
-    vec3 v;       // velocity
-    float P;      // pressure
-    float T;      // temperature
-    float debris; // debris density
-};
-
-float adjustedTemperature(in vec3 wsP,             // world space point of current voxel
-                          in LocalData local_data, // local quantities of current voxel
-                          in vec3 L)               // world-space extents of grid
-{
-    // Modify current temperature to account for e.g. radiation loss
-    // @todo: Tambient and radiationLoss will be defined in user code:
-    //      T0        = reference temperature for buoyancy
-    //      Tambient  = temperature which generates buoyancy which balances gravity
-    // Apply thermal relaxation to ambient temperature due to "radiation loss"
-    float dT = local_data.T - Tambient;
-    return Tambient + dT*exp(-radiationLoss);
-}
-
-vec3 externalForces(in vec3 wsP,             // world space point of current voxel
-                    in LocalData local_data, // local quantities of current voxel
-                    in vec3 L)               // world-space extents of grid
-{
-    // @todo: gravity, buoyancy and T0 will be defined in user code
-    float buoyancy_force = -gravity + gravity*buoyancy*(local_data.T - T0);
-    return vec3(0.0, buoyancy_force, 0.0);
-}
-
-///////////////////////////////////////////////////////////////////////////////////
-
 
 vec3 mapFragToVs(in ivec2 frag)
 {
@@ -178,6 +141,8 @@ bool isSolidCell(in ivec3 vsPi)
 
 void main()
 {
+    init();
+
     // fragment range over [N*N, N] space
     ivec2 frag = ivec2(gl_FragCoord.xy);
     vec3 vsP = mapFragToVs(frag);
@@ -201,21 +166,12 @@ void main()
         float T      = interp(Tair_sampler, wsPp).x;
         float debris = interp(debris_sampler, wsPp).x;
 
-        LocalData local_data;
-        local_data.v = v;
-        local_data.P = P;
-        local_data.T = T;
-        local_data.debris = debris;
-
         // Apply external forces
-        v += timestep * externalForces(wsP, local_data, L);
+        v += timestep * externalForces(wsP, v, P, T, L);
 
         // Apply vorticity confinement:
         // @todo (only if vorticity confinement enabled)
         v += timestep * vorticityConfinementForce(frag, vsPi);
-
-        // Adjust temperature due to any additional physics
-        T = adjustedTemperature(wsP, local_data, L);
 
         Vair_output   = vec4(v, 0.0);
         Pair_output   = vec4(P);
@@ -266,102 +222,6 @@ in vec2 TexCoord;
 void main() 
 {
     gl_Position = vec4(Position, 1.0);
-}
-`,
-
-'debris-fragment-shader': `#version 300 es
-precision highp float;
-
-// Geometry
-uniform int Nx;
-uniform int Ny;
-uniform int Nz;
-uniform int Ncol;
-uniform int W;
-uniform int H;
-uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
-uniform float dL;
-
-// Physics
-uniform float timestep;
-
-in vec2 v_texcoord;
-
-/////// input buffers ///////
-uniform sampler2D debris_sampler; // 0, float debris density field
-uniform sampler2D Vair_sampler;   // 1, vec3 velocity field
-
-/////// output buffers ///////
-layout(location = 0) out vec4 debris_output;
-
-vec3 mapFragToVs(in ivec2 frag)
-{
-    // map fragment coord in [W, H] to continuous position of corresponding voxel center in voxel space
-    int iu = frag.x;
-    int iv = frag.y;
-    int row = int(floor(float(iv)/float(Nz)));
-    int col = int(floor(float(iu)/float(Nx)));
-    int i = iu - col*Nx;
-    int j = col + row*Ncol;
-    int k = iv - row*Nz;
-    return vec3(ivec3(i, j, k)) + vec3(0.5);
-}
-
-vec2 slicetoUV(int j, vec3 vsP)
-{
-    // Given y-slice index j, and continuous voxel space xz-location,
-    // return corresponding continuous frag UV for interpolation within this slice
-    int row = int(floor(float(j)/float(Ncol)));
-    int col = j - row*Ncol;
-    vec2 uv_ll = vec2(float(col*Nx)/float(W), float(row*Nz)/float(H));
-    float du = vsP.x/float(W);
-    float dv = vsP.z/float(H);
-    return uv_ll + vec2(du, dv);
-}
-
-vec4 interp(in sampler2D S, in vec3 wsP)
-{
-    vec3 vsP = wsP / dL;
-    float pY = vsP.y - 0.5;
-    int jlo = clamp(int(floor(pY)), 0, Ny-1); // lower j-slice
-    int jhi = clamp(         jlo+1, 0, Ny-1); // upper j-slice
-    float flo = float(jhi) - pY;              // lower j fraction
-    float fhi = 1.0 - flo;                    // upper j fraction
-    vec2 uv_lo = slicetoUV(jlo, vsP);
-    vec2 uv_hi = slicetoUV(jhi, vsP);
-    vec4 Slo = texture(S, uv_lo);
-    vec4 Shi = texture(S, uv_hi);
-    return flo*Slo + fhi*Shi;
-}
-
-vec3 clampToBounds(in vec3 wsX)
-{
-    vec3 halfVoxel = vec3(0.5*dL);
-    return clamp(wsX, halfVoxel, L-halfVoxel);
-}
-
-vec3 back_advect(in vec3 wsX, in vec3 vX, float h)
-{
-    // RK4 integration for position wsX advected backwards through time h:
-    vec3 k1 = vX;
-    vec3 k2 = interp(Vair_sampler, clampToBounds(wsX - 0.5*h*k1)).xyz;
-    vec3 k3 = interp(Vair_sampler, clampToBounds(wsX - 0.5*h*k2)).xyz;
-    vec3 k4 = interp(Vair_sampler, clampToBounds(wsX -     h*k3)).xyz;
-    return clampToBounds(wsX - h*(k1 + 2.0*k2 + 2.0*k3 + k4)/6.0);
-}
-
-void main()
-{
-    // fragment range over [N*N, N] space
-    ivec2 frag = ivec2(gl_FragCoord.xy);
-    vec3 vsP = mapFragToVs(frag);
-    vec3 wsP = vsP*dL;
-
-    // Apply semi-Lagrangian advection
-    vec3 v0 = texelFetch(Vair_sampler, frag, 0).rgb;
-    vec3 wsPp = back_advect(wsP, v0, timestep);
-    vec3 debris_p = interp(debris_sampler, wsPp).rgb;
-    debris_output = vec4(debris_p, 1.0);
 }
 `,
 
@@ -421,6 +281,8 @@ bool isSolidCell(in ivec3 vsPi)
 
 void main()
 {
+    init();
+
     ivec2 frag = ivec2(gl_FragCoord.xy);
     ivec3 vsX = ivec3(floor(mapFragToVs(frag)));
     int ix = vsX.x;
@@ -505,6 +367,8 @@ vec3 mapFragToVs(in ivec2 frag)
 
 void main()
 {
+    init();
+
     // fragment range over [N*N, N] space
     ivec2 frag = ivec2(gl_FragCoord.xy);
     vec3 vsP = mapFragToVs(frag);
@@ -589,6 +453,8 @@ vec3 mapFragToVs(in ivec2 frag)
 
 void main()
 {
+    init();
+
     // fragment range over [N*N, N] space
     ivec2 frag = ivec2(gl_FragCoord.xy);
     vec3 vsP = mapFragToVs(frag);
@@ -724,6 +590,8 @@ bool isSolidCell(in ivec3 vsPi)
 
 void main()
 {
+    init();
+
     ivec2 frag = ivec2(gl_FragCoord.xy);
     ivec3 vsX = ivec3(floor(mapFragToVs(frag)));
     int ix = vsX.x;
@@ -933,6 +801,8 @@ bool isSolidCell(in ivec3 vsPi)
 
 void main()
 {
+    init();
+
     // Setup local stencil:
     ivec2 frag = ivec2(gl_FragCoord.xy);
     ivec3 vsXi = ivec3(floor(mapFragToVs(frag)));

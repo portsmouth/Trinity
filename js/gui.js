@@ -82,9 +82,12 @@ GUI.prototype.generateSimulationFolder = function()
     this.simulationFolder = simulationFolder;
     simulationFolder.parameters = {};
 
-    let glsl = trinity.getGlsl();
-    if (glsl === undefined)
-        return;
+    let glsl = '';
+    glsl += trinity.getGlsl('common') + '\n';
+    glsl += trinity.getGlsl('initial') + '\n';
+    glsl += trinity.getGlsl('inject') + '\n';
+    glsl += trinity.getGlsl('advect') + '\n';
+    glsl += trinity.getGlsl('collide') + '\n';
 
     // Parse code for uniform bindings:
     let SOLVER = trinity.getSolver();
@@ -163,9 +166,9 @@ GUI.prototype.createSolverSettings = function()
     this.solverFolder.Ny = solver.settings.Ny;
     this.solverFolder.Nz = solver.settings.Nz;
 
-    this.solverFolder.add(this.solverFolder, 'Nx', 32, 512).onChange(                function(Nx) { solver.resize(Math.floor(Nx), solver.settings.Ny, solver.settings.Nz); } );
-    this.solverFolder.add(this.solverFolder, 'Ny', 32, 512).onChange(                function(Ny) { solver.resize(solver.settings.Nx, Math.floor(Ny), solver.settings.Nz); } );
-    this.solverFolder.add(this.solverFolder, 'Nz', 32, 512).onChange(                function(Nz) { solver.resize(solver.settings.Nx, solver.settings.Ny, Math.floor(Nz)); } );
+    this.solverFolder.add(this.solverFolder, 'Nx', 32, 1024).onChange(                function(Nx) { solver.resize(Math.floor(Nx), solver.settings.Ny, solver.settings.Nz); } );
+    this.solverFolder.add(this.solverFolder, 'Ny', 32, 1024).onChange(                function(Ny) { solver.resize(solver.settings.Nx, Math.floor(Ny), solver.settings.Nz); } );
+    this.solverFolder.add(this.solverFolder, 'Nz', 32, 1024).onChange(                function(Nz) { solver.resize(solver.settings.Nx, solver.settings.Ny, Math.floor(Nz)); } );
     this.solverFolder.add(solver.settings, 'NprojSteps', 1, 256).onChange(         function(NprojSteps) { solver.NprojSteps = NprojSteps; solver.restart(); } );
     this.solverFolder.add(solver.settings, 'timestep', 0.0, 10.0).onChange(        function() { solver.restart(); } );
     this.solverFolder.add(solver.settings, 'vorticity_scale', 0.0, 0.99).onChange( function() { solver.restart(); } );
@@ -179,7 +182,7 @@ GUI.prototype.createSolverSettings = function()
     this.solverFolder.add(solver, 'debrisFalloff', 0.0, 1.0).onChange(         function() { solver.restart(); } );
     this.solverFolder.add(solver, 'gravity', 0.0, 1.0).onChange(               function() { solver.restart(); } );
     this.solverFolder.add(solver, 'T0', 0.0, 1000.0).onChange(                 function() { solver.restart(); } );
-    this.solverFolder.add(solver, 'Tambient', 0.0, 1000.0).onChange(           function() { solver.restart(); } );
+
     this.solverFolder.add(solver, 'buoyancy', 0.0, 1.0).onChange(              function() { solver.restart(); } );
     this.solverFolder.add(solver, 'expansion', 0.0, 1.0).onChange(             function() { solver.restart(); } );
     this.solverFolder.add(solver, 'radiationLoss', 0.0, 1.0).onChange(         function() { solver.restart(); } );

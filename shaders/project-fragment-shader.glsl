@@ -59,6 +59,8 @@ bool isSolidCell(in ivec3 vsPi)
 
 void main()
 {
+    init();
+
     ivec2 frag = ivec2(gl_FragCoord.xy);
     ivec3 vsX = ivec3(floor(mapFragToVs(frag)));
     int ix = vsX.x;

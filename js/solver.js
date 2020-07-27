@@ -12,7 +12,6 @@ var Solver = function()
                                                   "project",
                                                   "copy",
                                                   "update",
-                                                  "debris",
                                                   "vorticity"
                                                 ]);
 
@@ -47,10 +46,6 @@ var Solver = function()
     this.uniforms_vec3 = {};
 
     this.compiled_successfully = false;
-    this.compileShaders();
-
-    this.resize(128, 512, 128);
-    this.restart();
     this.paused = false;
 }
 
@@ -84,36 +79,36 @@ Solver.prototype.compileShaders = function()
 {
     console.warn("[Trinity] Solver.prototype.compileShaders");
 
-    let glsl = trinity.getGlsl();
-    if (glsl === undefined)
-        return;
+    let common_glsl  = trinity.getGlsl('common') + '\n';
+    let collide_glsl = common_glsl + trinity.getGlsl('collide')  + '\n';
+
+    let initial_glsl = common_glsl + trinity.getGlsl('initial');
+    let inject_glsl  = collide_glsl + trinity.getGlsl('inject');
+    let advect_glsl  = collide_glsl + trinity.getGlsl('advect');
 
     this.uniforms_float = {};
     this.uniforms_vec3 = {};
 
     trinity.getGUI().refresh();
 
-    replacements = {};
-    replacements._USER_CODE_ = glsl;
-
     this.compiled_successfully = false;
 
-    this.initial_program   = new GLU.Shader('initial',    this.shaderSources, replacements);
+    this.initial_program   = new GLU.Shader('initial',    this.shaderSources,  { _USER_CODE_: initial_glsl });
     if (!this.initial_program.program) { this.initial_program = null; return; }
 
-    this.inject_program       = new GLU.Shader('inject',        this.shaderSources, replacements);
+    this.inject_program       = new GLU.Shader('inject',        this.shaderSources,  { _USER_CODE_: inject_glsl });
     if (!this.inject_program.program) { this.inject_program = null; return; }
 
-    this.advect_program       = new GLU.Shader('advect',        this.shaderSources, replacements);
+    this.advect_program       = new GLU.Shader('advect',        this.shaderSources,  { _USER_CODE_: advect_glsl });
     if (!this.advect_program.program) { this.advect_program = null; return; }
 
-    this.project_program      = new GLU.Shader('project',       this.shaderSources, replacements);
+    this.project_program      = new GLU.Shader('project',       this.shaderSources,  { _USER_CODE_: collide_glsl });
     if (!this.project_program.program) { this.project_program = null; return; }
 
-    this.div_program          = new GLU.Shader('div',           this.shaderSources, replacements);
+    this.div_program          = new GLU.Shader('div',           this.shaderSources,  { _USER_CODE_: collide_glsl });
     if (!this.div_program.program) { this.div_program = null; return; }
 
-    this.update_program       = new GLU.Shader('update',        this.shaderSources, replacements);
+    this.update_program       = new GLU.Shader('update',        this.shaderSources,  { _USER_CODE_: collide_glsl });
     if (!this.update_program.program) { this.update_program = null; return; }
 
     this.copy_program         = new GLU.Shader('copy',          this.shaderSources, null);
@@ -133,9 +128,6 @@ Solver.prototype.updateShaders = function()
     this.compileShaders();
     if (!this.compiled_successfully)
         return;
-
-    this.frame = 0;
-    this.time = 0.0;
 }
 
 Solver.prototype.getDomain = function()
@@ -420,6 +412,7 @@ Solver.prototype.step = function()
         this.advect_program.uniformF("radiationLoss", this.radiationLoss * 1.0e-2);
         this.advect_program.uniformF("T0",            this.domain.T0);
         this.advect_program.uniformF("Tambient",      this.Tambient);
+        this.syncUserUniforms(this.advect_program);
 
         this.fbo.bind();
         this.fbo.drawBuffers(4);
@@ -480,6 +473,7 @@ Solver.prototype.step = function()
         this.div_program.uniformI("Ncol",          this.domain.Ncol);
         this.div_program.uniform3Fv("L",           this.domain.L);
         this.div_program.uniformF("dL",            this.domain.dL);
+        this.syncUserUniforms(this.div_program);
         this.fbo.bind();
         this.fbo.drawBuffers(1);
         this.fbo.attachTexture(this.divVair, 0); // write to divVair
@@ -503,6 +497,7 @@ Solver.prototype.step = function()
         this.project_program.uniformF("dL",            this.domain.dL);
         this.project_program.uniformF("timestep",  this.settings.timestep);
         this.project_program.uniformF("expansion", this.expansion);
+        this.syncUserUniforms(this.project_program);
 
         // Update pressure field by Jacobi iteration
         // (using last frame pressure as a warm-start)

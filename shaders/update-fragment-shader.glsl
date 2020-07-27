@@ -58,6 +58,8 @@ bool isSolidCell(in ivec3 vsPi)
 
 void main()
 {
+    init();
+
     // Setup local stencil:
     ivec2 frag = ivec2(gl_FragCoord.xy);
     ivec3 vsXi = ivec3(floor(mapFragToVs(frag)));

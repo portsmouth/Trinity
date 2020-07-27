@@ -36,6 +36,8 @@ jsSources = [
 '../js/thirdparty/jquery-ui.min.js',
 '../js/thirdparty/jquery-ui.css.js',
 '../js/thirdparty/codemirror/codemirror.js',
+'../js/thirdparty/codemirror/panel.js',
+'../js/thirdparty/codemirror/buttons.js',
 '../js/thirdparty/codemirror/codemirror.css.js',
 '../js/thirdparty/codemirror/clike.js',
 '../js/thirdparty/gif.js/gif.js',

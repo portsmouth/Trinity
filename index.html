@@ -16,6 +16,8 @@ background-size: 100%;">
 <script src='./js/thirdparty/jquery-ui.min.js'></script>
 <script src='./js/thirdparty/jquery-ui.css.js'></script>
 <script src='./js/thirdparty/codemirror/codemirror.js'></script>
+<script src='./js/thirdparty/codemirror/panel.js'></script>
+<script src='./js/thirdparty/codemirror/buttons.js'></script>
 <script src='./js/thirdparty/codemirror/codemirror.css.js'></script>
 <script src='./js/thirdparty/codemirror/clike.js'></script>
 <script src='./js/thirdparty/gif.js/gif.js'></script>
@@ -210,6 +212,44 @@ function onLoad()
     }, {
         lineNumbers: true,
         mode: "x-shader/x-fragment"
+        ,
+        buttons: [
+            {
+                label: 'common',
+                callback: function (cm) {
+                    let doc = trinity.getDoc('common');
+                    editor.swapDoc(doc);
+                }
+            },
+            {
+                label: 'initial',
+                callback: function (cm) {
+                    let doc = trinity.getDoc('initial');
+                    editor.swapDoc(doc);
+                }
+            },
+            {
+                label: 'inject',
+                callback: function (cm) {
+                    let doc = trinity.getDoc('inject');
+                    editor.swapDoc(doc);
+                }
+            },
+            {
+                label: 'advect',
+                callback: function (cm) {
+                    let doc = trinity.getDoc('advect');
+                    editor.swapDoc(doc);
+                }
+            },
+            {
+                label: 'collide',
+                callback: function (cm) {
+                    let doc = trinity.getDoc('collide');
+                    editor.swapDoc(doc);
+                }
+            }
+        ]
     });
     $( function() {
         $(editor.getWrapperElement()).resizable();

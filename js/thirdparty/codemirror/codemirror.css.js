@@ -7,9 +7,9 @@ var codemirror_css_rules = `
   /* Set height, width, borders, and global font properties here */
   font-family: monospace;
   font-size: 12px;
-  height: 300px;
-  width: 500px;
-  top: 50px;
+  height: 400px;
+  width: 600px;
+  top: 90px;
   color: black;
   position: relative;
   direction: ltr;
@@ -18,7 +18,23 @@ var codemirror_css_rules = `
   z-index: 0;
 }
 
-.CodeMirror-scroll { max-height: 70vh; }
+.CodeMirror-scroll {
+    height: auto;
+    max-height: 100vh;
+}
+
+.CodeMirror-buttonsPanel {
+    margin-bottom: .5em;
+    position: absolute;
+    top: 50px;
+}
+
+.CodeMirror-buttonsPanel button {
+    padding: .5em;
+    width: 8em;
+    margin-right: .5em;
+    text-align: center;
+}
 
 /* PADDING */
 

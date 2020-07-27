@@ -35,6 +35,8 @@ vec3 mapFragToVs(in ivec2 frag)
 
 void main()
 {
+    init();
+
     // fragment range over [N*N, N] space
     ivec2 frag = ivec2(gl_FragCoord.xy);
     vec3 vsP = mapFragToVs(frag);
