@@ -18,6 +18,11 @@ uniform sampler2D Pair_sampler; // 1, float pressure field
 /////// output buffers ///////
 layout(location = 0) out vec4 Vair_output;
 
+/////////////////////// user-defined code ///////////////////////
+_USER_CODE_
+/////////////////////// user-defined code ///////////////////////
+
+
 vec3 mapFragToVs(in ivec2 frag)
 {
     // map fragment coord in [W, H] to continuous position of corresponding voxel center in voxel space
@@ -43,8 +48,6 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     int iv = row*Nz + k;
     return ivec2(iu, iv);
 }
-
-_USER_CODE_
 
 bool isSolidCell(in ivec3 vsPi)
 {

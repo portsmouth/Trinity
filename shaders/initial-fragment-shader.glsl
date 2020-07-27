@@ -20,35 +20,6 @@ layout(location = 3) out vec4 debris_output;
 _USER_CODE_
 /////////////////////// user-defined code ///////////////////////
 
-vec3 blast_center;
-float blast_radius;
-float blast_velocity;
-float blast_temperature_contrast;
-float T_ambient;
-vec3 debris_density;
-vec3 debris_albedo;
-
-// Specify velocity, temperature, and debris density/albedo at time=0
-void initial_conditions(in vec3 wsP,                // world space point of current voxel
-                        in vec3 L,                  // world-space extents of grid
-                        inout vec3 velocity,        // initial velocity
-                        inout float temperature,    // initial temperature
-                        inout vec3 density,         // initial per-channel debris extinction
-                        inout vec3 albedo)          // initial per-channel debris albedo
-{
-    velocity = vec3(0.0);
-
-    float T_ambient = 300.0;
-    temperature = T_ambient;
-
-    density = vec3(0.0);
-    albedo = vec3(0.0);
-}
-
-
-///////////////////////////////////////////////////////////////////////////////////
-
-
 vec3 mapFragToVs(in ivec2 frag)
 {
     // map fragment coord in [W, H] to continuous position of corresponding voxel center in voxel space

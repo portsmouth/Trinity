@@ -9,8 +9,6 @@ var GUI = function(visible = true)
 	this.gui.domElement.id = 'gui';
 	var gui = this.gui;
 	this.visible = visible;
-
-	this.createguiSettings();
 	if (!visible)
 		this.gui.__proto__.constructor.toggleHide();
 }
@@ -46,13 +44,21 @@ dat.GUI.prototype.removeFolder = function(name) {
   }
 
   
-GUI.prototype.refresh = function()
+GUI.prototype.wipe = function()
 {
     if (this.presetsFolder    != undefined) this.gui.removeFolder(this.presetsFolder.name);
     if (this.simulationFolder != undefined) this.gui.removeFolder(this.simulationFolder.name);
+    if (this.solverFolder     != undefined) this.gui.removeFolder(this.solverFolder.name);
     if (this.rendererFolder   != undefined) this.gui.removeFolder(this.rendererFolder.name);
+}
 
-    this.createguiSettings();
+GUI.prototype.refresh = function()
+{
+    this.wipe();
+    this.addPresetsFolder();
+    this.generateSimulationFolder();
+    this.createSolverSettings();
+    this.createRendererSettings();
 }
 
 GUI.prototype.toggleHide = function()
@@ -70,11 +76,74 @@ function hexToRgb(hex)
     } : null;
 }
 
-
-GUI.prototype.createguiSettings = function()
+GUI.prototype.generateSimulationFolder = function()
 {
-    this.guiSettings = {};
+    let simulationFolder = this.gui.addFolder('Simulation');
+    this.simulationFolder = simulationFolder;
+    simulationFolder.parameters = {};
 
+    let glsl = trinity.getGlsl();
+    if (glsl === undefined)
+        return;
+
+    // Parse code for uniform bindings:
+    let SOLVER = trinity.getSolver();
+    let GUI = this;
+
+    let lines = glsl.split("\n");
+    lines.forEach(function(line) {
+        line = line.trim();
+        if (line.startsWith('uniform'))
+        {
+            // find beginning of comment
+            let bind_statement = line.substr(line.indexOf('//')+2);
+            try {
+                let bind_object = JSON.parse(bind_statement);
+                let param_name    = bind_object.label;
+                let param_default = bind_object.default;
+                if ((param_name    !== undefined) &&
+                    (param_default !== undefined))
+                {
+                    if (typeof param_default == 'number')
+                    {
+                        // add numeric slider
+                        let min_val = 0.0;
+                        let max_val = param_default * 5.0;
+                        let step_val = 0.001;
+                        if (typeof bind_object.min == 'number') min_val = bind_object.min;
+                        if (typeof bind_object.max == 'number') max_val = bind_object.max;
+                        if (typeof bind_object.step == 'number') step_val = bind_object.step;
+                        simulationFolder.parameters[param_name] = param_default;
+                        GUI.addSlider(simulationFolder.parameters,
+                                                   {name: param_name, min: min_val, max: max_val, step: step_val},
+                                                   simulationFolder);
+                        SOLVER.syncFloatToShader(param_name, param_default);
+                    }
+                    else if (Array.isArray(param_default) && param_default.length==3)
+                    {
+                        // add color picker
+                        let scale = 1.0;
+                        if (typeof bind_object.scale == 'number')
+                            scale = bind_object.scale;
+                        simulationFolder.parameters[param_name] = param_default;
+                        GUI.addColor(simulationFolder.parameters,
+                                                  param_name,
+                                                  scale,
+                                                  simulationFolder);
+                        SOLVER.syncColorToShader(param_name, param_default);
+                    }
+                }
+            } catch(e) {
+                console.log(e);
+            }
+        }
+    });
+
+    simulationFolder.open();
+}
+
+GUI.prototype.addPresetsFolder = function()
+{
     // Presets folder
     this.presetsFolder = this.gui.addFolder('Presets');
     let preset_names = trinity.presets.get_preset_names();
@@ -82,9 +151,40 @@ GUI.prototype.createguiSettings = function()
     this.presetSettings["preset"] = trinity.preset_selection;
     var presetItem = this.presetsFolder.add(this.presetSettings, 'preset', preset_names);
     presetItem.onChange(function(preset_name) { trinity.presets.load_preset(preset_name); });
+}
 
-	this.createSimulationSettings();
-	this.createRendererSettings();
+GUI.prototype.createSolverSettings = function()
+{
+    var solver = trinity.getSolver();
+
+    this.solverFolder = this.gui.addFolder('Solver');
+
+    this.solverFolder.Nx = solver.settings.Nx;
+    this.solverFolder.Ny = solver.settings.Ny;
+    this.solverFolder.Nz = solver.settings.Nz;
+
+    this.solverFolder.add(this.solverFolder, 'Nx', 32, 512).onChange(                function(Nx) { solver.resize(Math.floor(Nx), solver.settings.Ny, solver.settings.Nz); } );
+    this.solverFolder.add(this.solverFolder, 'Ny', 32, 512).onChange(                function(Ny) { solver.resize(solver.settings.Nx, Math.floor(Ny), solver.settings.Nz); } );
+    this.solverFolder.add(this.solverFolder, 'Nz', 32, 512).onChange(                function(Nz) { solver.resize(solver.settings.Nx, solver.settings.Ny, Math.floor(Nz)); } );
+    this.solverFolder.add(solver.settings, 'NprojSteps', 1, 256).onChange(         function(NprojSteps) { solver.NprojSteps = NprojSteps; solver.restart(); } );
+    this.solverFolder.add(solver.settings, 'timestep', 0.0, 10.0).onChange(        function() { solver.restart(); } );
+    this.solverFolder.add(solver.settings, 'vorticity_scale', 0.0, 0.99).onChange( function() { solver.restart(); } );
+
+    // @todo: move to user code
+    this.solverFolder.add(solver, 'blastHeight', 0.0, 1.0).onChange(           function() { solver.restart(); } );
+    this.solverFolder.add(solver, 'blastRadius', 0.0, 1.0).onChange(           function() { solver.restart(); } );
+    this.solverFolder.add(solver, 'blastTemperature', 0.0, 100000.0).onChange( function() { solver.restart(); } );
+    this.solverFolder.add(solver, 'blastVelocity', 0.0, 1000.0).onChange(      function() { solver.restart(); } );
+    this.solverFolder.add(solver, 'debrisHeight', 0.0, 1.0).onChange(          function() { solver.restart(); } );
+    this.solverFolder.add(solver, 'debrisFalloff', 0.0, 1.0).onChange(         function() { solver.restart(); } );
+    this.solverFolder.add(solver, 'gravity', 0.0, 1.0).onChange(               function() { solver.restart(); } );
+    this.solverFolder.add(solver, 'T0', 0.0, 1000.0).onChange(                 function() { solver.restart(); } );
+    this.solverFolder.add(solver, 'Tambient', 0.0, 1000.0).onChange(           function() { solver.restart(); } );
+    this.solverFolder.add(solver, 'buoyancy', 0.0, 1.0).onChange(              function() { solver.restart(); } );
+    this.solverFolder.add(solver, 'expansion', 0.0, 1.0).onChange(             function() { solver.restart(); } );
+    this.solverFolder.add(solver, 'radiationLoss', 0.0, 1.0).onChange(         function() { solver.restart(); } );
+
+    this.solverFolder.open();
 }
 
 GUI.prototype.createRendererSettings = function()
@@ -93,6 +193,7 @@ GUI.prototype.createRendererSettings = function()
     var renderer = trinity.getRenderer();
     var camera = trinity.getCamera();
 
+    this.rendererFolder.add(renderer.settings, 'Nraymarch', 32, 1024);
     this.rendererFolder.add(renderer.settings, 'exposure', -10.0, 10.0);
     this.rendererFolder.add(renderer.settings, 'gamma', 1.0, 3.0);
     this.rendererFolder.add(renderer.settings, 'debrisExtinction', 0.0, 100.0);
@@ -102,60 +203,6 @@ GUI.prototype.createRendererSettings = function()
 	this.rendererFolder.close();
 }
 
-GUI.prototype.createSimulationSettings = function()
-{
-    var solver = trinity.getSolver();
-
-    this.simulationFolder = this.gui.addFolder('Simulation');
-
-    this.simulationFolder.Nx = solver.settings.Nx;
-    this.simulationFolder.Ny = solver.settings.Ny;
-    this.simulationFolder.Nz = solver.settings.Nz;
-
-    this.simulationFolder.add(this.simulationFolder, 'Nx', 32, 512).onChange(                function(Nx) { solver.resize(Math.floor(Nx), solver.settings.Ny, solver.settings.Nz); } );
-    this.simulationFolder.add(this.simulationFolder, 'Ny', 32, 512).onChange(                function(Ny) { solver.resize(solver.settings.Nx, Math.floor(Ny), solver.settings.Nz); } );
-    this.simulationFolder.add(this.simulationFolder, 'Nz', 32, 512).onChange(                function(Nz) { solver.resize(solver.settings.Nx, solver.settings.Ny, Math.floor(Nz)); } );
-    this.simulationFolder.add(solver.settings, 'NprojSteps', 1, 256).onChange(         function(NprojSteps) { solver.NprojSteps = NprojSteps; solver.restart(); } );
-    this.simulationFolder.add(solver.settings, 'timestep', 0.0, 10.0).onChange(        function() { solver.restart(); } );
-    this.simulationFolder.add(solver.settings, 'vorticity_scale', 0.0, 0.99).onChange( function() { solver.restart(); } );
-
-    // @todo: move to user code
-    this.simulationFolder.add(solver, 'blastHeight', 0.0, 1.0).onChange(           function() { solver.restart(); } );
-    this.simulationFolder.add(solver, 'blastRadius', 0.0, 1.0).onChange(           function() { solver.restart(); } );
-    this.simulationFolder.add(solver, 'blastTemperature', 0.0, 100000.0).onChange( function() { solver.restart(); } );
-    this.simulationFolder.add(solver, 'blastVelocity', 0.0, 1000.0).onChange(      function() { solver.restart(); } );
-    this.simulationFolder.add(solver, 'debrisHeight', 0.0, 1.0).onChange(          function() { solver.restart(); } );
-    this.simulationFolder.add(solver, 'debrisFalloff', 0.0, 1.0).onChange(         function() { solver.restart(); } );
-    this.simulationFolder.add(solver, 'gravity', 0.0, 1.0).onChange(               function() { solver.restart(); } );
-    this.simulationFolder.add(solver, 'T0', 0.0, 1000.0).onChange(                 function() { solver.restart(); } );
-    this.simulationFolder.add(solver, 'Tambient', 0.0, 1000.0).onChange(           function() { solver.restart(); } );
-    this.simulationFolder.add(solver, 'buoyancy', 0.0, 1.0).onChange(              function() { solver.restart(); } );
-    this.simulationFolder.add(solver, 'expansion', 0.0, 1.0).onChange(             function() { solver.restart(); } );
-    this.simulationFolder.add(solver, 'radiationLoss', 0.0, 1.0).onChange(         function() { solver.restart(); } );
-
-    let button = { nuke:function(){ solver.reset(); }};
-    let button_ui = this.simulationFolder.add(button, 'nuke').name('NUKE');
-    button_ui.__li.className = 'cr link footer';
-
-    this.simulationFolder.open();
-}
-
-/**
- * Add a dat.GUI UI slider to control a float parameter.
- * The scene parameters need to be organized into an Object as
- * key-value pairs, for supply to this function.
- * @param {Object} parameters - the parameters object for the scene, with a key-value pair (where value is number) for the float parameter name
- * @param {Object} param - the slider range for this parameter, in the form `{name: 'foo', min: 0.0, max: 100.0, step: 1.0, recompile: true}` (step is optional, recompile is optional [default is false])
- * @param {Object} folder - optionally, pass the dat.GUI folder to add the parameter to (defaults to the main scene folder)
- * @returns {Object} the created dat.GUI slider item
- * @example
- *		Scene.prototype.initGui = function(gui)
- *		{
- *			gui.addSlider(this.parameters, c);
- *			gui.addSlider(this.parameters, {name: 'foo2', min: 0.0, max: 1.0});
- *			gui.addSlider(this.parameters, {name: 'bar', min: 0.0, max: 3.0, recompile: true});
- *		}
- */
 GUI.prototype.addSlider = function(parameters, param, folder=undefined)
 {
 	let _f = this.userFolder;
@@ -164,25 +211,14 @@ GUI.prototype.addSlider = function(parameters, param, folder=undefined)
 	var min  = param.min;
 	var max  = param.max;
 	var step = param.step;
-	var recompile = param.recompile;
-	var no_recompile = true;
-	if (!(recompile==null || recompile==undefined)) no_recompile = !recompile;
 	var item;
 	if (step==null || step==undefined) { item = _f.add(parameters, name, min, max, step); }
 	else                               { item = _f.add(parameters, name, min, max);       }
-	item.onChange( function(value) { gravy.reset(no_recompile); gravy.camera.enabled = false; } );
-	item.onFinishChange( function(value) { gravy.camera.enabled = true; } );
+	item.onChange( function(value) { trinity.camera.enabled = false; } );
+	item.onFinishChange( function(value) { trinity.getSolver().syncFloatToShader(name, value); trinity.camera.enabled = true; } );
 	return item;
 }
 
-/** 
- * Add a dat.GUI UI color picker to control a 3-element array parameter (where the RGB color channels are mapped into [0,1] float range)
- * @param {Object} parameters - the parameters object for the scene, with a key-value pair (where value is a 3-element array) for the color parameter name
- * @param {Object} name - the color parameter name
- * @param {Object} folder - optionally, pass a scale factor to apply to the RGB color components to calculate the result (defaults to 1.0)
- * @param {Object} folder - optionally, pass the dat.GUI folder to add the parameter to (defaults to the main scene folder)
- * @returns {Object} the created dat.GUI color picker item
-*/
 GUI.prototype.addColor = function(parameters, name, scale=1.0, folder=undefined)
 {
 	let _f = this.userFolder;
@@ -203,16 +239,11 @@ GUI.prototype.addColor = function(parameters, name, scale=1.0, folder=undefined)
 									parameters[name][1] = scale * color[1] / 255.0;
 									parameters[name][2] = scale * color[2] / 255.0;
 								}
-								gravy.reset(true);
+								trinity.getSolver().syncColorToShader(name, parameters[name]);
 							} );
 	return item;
 }
 
-// (deprecated)
-GUI.prototype.addParameter = function(parameters, param)
-{
-	this.addSlider(parameters, param);
-}
 
 /**
 * Access to internal dat.GUI object

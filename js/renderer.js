@@ -8,6 +8,7 @@ var Renderer = function()
     // Default user-adjustable properties
     this.settings = {};
 
+    this.settings.Nraymarch = 128;
     this.settings.exposure = -1.0;
     this.settings.gamma = 2.2;
     this.settings.blackbodyEmission = -9.5;
@@ -185,7 +186,7 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniformI("H",              domain.H);
         this.volumeProgram.uniform3Fv("L",            domain.L);
         this.volumeProgram.uniformF("dL",             domain.dL);
-        this.volumeProgram.uniformI("Nraymarch", 256);
+        this.volumeProgram.uniformI("Nraymarch", this.settings.Nraymarch);
 
         // Physics
         this.volumeProgram.uniformF("debrisExtinction", this.settings.debrisExtinction);

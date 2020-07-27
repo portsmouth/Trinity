@@ -18,7 +18,6 @@ uniform float buoyancy;         // @todo: move to user code
 uniform float gravity;          // @todo: move to user code
 uniform float radiationLoss;    // @todo: move to user code
 uniform float T0;               // @todo: move to user code
-uniform float Tambient;         // @todo: move to user code
 
 in vec2 v_texcoord;
 

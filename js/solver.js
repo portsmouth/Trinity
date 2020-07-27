@@ -33,15 +33,18 @@ var Solver = function()
     this.blastHeight = 0.1;
     this.blastRadius = 0.15;
     this.blastTemperature = 500.0;   // initial temperature of fireball relative to ambient
-    this.blastVelocity = 100.0;        // outward blast speed in voxels/timestep
-    this.debrisHeight = 0.1;        // maximum height of dust layer, as a fraction of domain height
-    this.debrisFalloff = 0.5;       // fall-off exponent within dust layer
-    this.T0       = 266.0;                  // nominal reference temperature for buoyancy
-    this.Tambient = 270.0;                  // nominal reference temperature for buoyancy
-    this.buoyancy = 0.2;           // initial buoyancy (thermal expansion coeff. of air)
+    this.blastVelocity = 100.0;      // outward blast speed in voxels/timestep
+    this.debrisHeight = 0.1;         // maximum height of dust layer, as a fraction of domain height
+    this.debrisFalloff = 0.5;        // fall-off exponent within dust layer
+    this.T0       = 266.0;           // nominal reference temperature for buoyancy
+    this.Tambient = 270.0;           // nominal reference temperature for buoyancy
+    this.buoyancy = 0.2;             // initial buoyancy (thermal expansion coeff. of air)
     this.expansion = 0.0;
-    this.gravity = 0.003; //0.5;
+    this.gravity = 0.003;
     this.radiationLoss = 0.0;        // radiation loss rate (per timestep fractional absorption)
+
+    this.uniforms_float = {};
+    this.uniforms_vec3 = {};
 
     this.compiled_successfully = false;
     this.compileShaders();
@@ -49,7 +52,32 @@ var Solver = function()
     this.resize(128, 512, 128);
     this.restart();
     this.paused = false;
+}
 
+Solver.prototype.syncFloatToShader = function(name, value)
+{
+    this.uniforms_float[name] = value;
+}
+
+Solver.prototype.syncColorToShader = function(name, color)
+{
+    this.uniforms_vec3[name] = color;
+}
+
+Solver.prototype.syncUserUniforms = function(program)
+{
+    for (const key of Object.keys(this.uniforms_float))
+    {
+        let uniform_name = key;
+        let float_value = this.uniforms_float[key];
+        program.uniformF(uniform_name, float_value);
+    }
+    for (const key of Object.keys(this.uniforms_vec3))
+    {
+        let uniform_name = key;
+        let vec3_value = this.uniforms_vec3[key];
+        program.uniform3Fv(uniform_name, vec3_value);
+    }
 }
 
 Solver.prototype.compileShaders = function()
@@ -57,6 +85,14 @@ Solver.prototype.compileShaders = function()
     console.warn("[Trinity] Solver.prototype.compileShaders");
 
     let glsl = trinity.getGlsl();
+    if (glsl === undefined)
+        return;
+
+    this.uniforms_float = {};
+    this.uniforms_vec3 = {};
+
+    trinity.getGUI().refresh();
+
     replacements = {};
     replacements._USER_CODE_ = glsl;
 
@@ -259,6 +295,7 @@ Solver.prototype.step = function()
         this.initial_program.uniformI("H",              this.domain.H);
         this.initial_program.uniform3Fv("L",            this.domain.L);
         this.initial_program.uniformF("dL",             this.domain.dL);
+        this.syncUserUniforms(this.initial_program);
 
         this.fbo.bind();
         this.fbo.drawBuffers(4);
@@ -286,6 +323,8 @@ Solver.prototype.step = function()
         this.inject_program.uniform3Fv("L",            this.domain.L);
         this.inject_program.uniformF("dL",             this.domain.dL);
         this.inject_program.uniformF("time",           this.time);
+        this.syncUserUniforms(this.inject_program);
+
         this.fbo.bind();
         this.fbo.drawBuffers(3);
         this.fbo.attachTexture(this.Vair[1], 0);   // write to  Vair[1]
