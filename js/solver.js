@@ -27,21 +27,9 @@ var Solver = function()
     this.settings.Nx = 0;
     this.settings.Ny = 0;
     this.settings.Nz = 0;
-
-    // @todo: all these will be defined in user code:
-    this.blastHeight = 0.1;
-    this.blastRadius = 0.15;
-    this.blastTemperature = 500.0;   // initial temperature of fireball relative to ambient
-    this.blastVelocity = 100.0;      // outward blast speed in voxels/timestep
-    this.debrisHeight = 0.1;         // maximum height of dust layer, as a fraction of domain height
-    this.debrisFalloff = 0.5;        // fall-off exponent within dust layer
-    this.T0       = 266.0;           // nominal reference temperature for buoyancy
-    this.Tambient = 270.0;           // nominal reference temperature for buoyancy
-    this.buoyancy = 0.2;             // initial buoyancy (thermal expansion coeff. of air)
-    this.expansion = 0.0;
-    this.gravity = 0.003;
-    this.radiationLoss = 0.0;        // radiation loss rate (per timestep fractional absorption)
-
+    this.settings.max_timesteps = 100;
+    this.settings.expansion = 0.0;
+ 
     this.uniforms_float = {};
     this.uniforms_vec3 = {};
 
@@ -168,11 +156,11 @@ Solver.prototype.resize = function(Nx, Ny, Nz)
     this.W = W;
     this.H = H;
 
-    let Vair0    = new Float32Array(W*H*4);  // air velocity field
-    let divVair0 = new Float32Array(W*H*4);  // air velocity divergence field
-    let Pair0    = new Float32Array(W*H*4);  // air pressure field
-    let Tair0    = new Float32Array(W*H*4);  // air temperature field
-    let debris0  = new Float32Array(W*H*4);  // debris extinction field
+    let Vair0     = new Float32Array(W*H*4);  // air velocity field
+    let divVair0  = new Float32Array(W*H*4);  // air velocity divergence field
+    let Pair0     = new Float32Array(W*H*4);  // air pressure field
+    let Tair0     = new Float32Array(W*H*4);  // air temperature field
+    let debris0   = new Float32Array(W*H*4);  // debris extinction field
     let vorticity = new Float32Array(W*H*4);  // vorticity field
 
     let dL = 1.0; // voxel size in world units
@@ -180,8 +168,6 @@ Solver.prototype.resize = function(Nx, Ny, Nz)
 
     let L = [dL*Nx, dL*Ny, dL*Nz];
     this.L = L;
-    let lengthScale = Math.min(L[0], L[1], L[2]);
-    let blast_center = [0.5*L[0], L[1]*this.blastHeight, 0.5*L[2]];
 
     // Initial velocity texture
     this.Vair = [ new GLU.Texture(W, H, 4, true, true, true, Vair0),
@@ -216,7 +202,6 @@ Solver.prototype.resize = function(Nx, Ny, Nz)
                     boundsMin:    [0.0,       0.0,       0.0      ],
                     boundsMax:    [dL*Nx,     dL*Ny,     dL*Nz    ],
                     boundsCenter: [dL*Nx/2.0, dL*Ny/2.0, dL*Nz/2.0],
-                    T0: this.T0
                   };
 
     this.frame = 0;
@@ -269,6 +254,9 @@ Solver.prototype.step = function()
 
     if (this.paused)
         return;
+
+    if (this.frame == this.settings.max_timesteps)
+        this.restart();
 
     let gl = GLU.gl;
 
@@ -407,11 +395,6 @@ Solver.prototype.step = function()
         this.advect_program.uniformF("time",           this.time);
         this.advect_program.uniformF("timestep",        this.settings.timestep);
         this.advect_program.uniformF("vorticity_scale", this.settings.vorticity_scale);
-        this.advect_program.uniformF("buoyancy",      this.buoyancy);
-        this.advect_program.uniformF("gravity",       this.gravity);
-        this.advect_program.uniformF("radiationLoss", this.radiationLoss * 1.0e-2);
-        this.advect_program.uniformF("T0",            this.domain.T0);
-        this.advect_program.uniformF("Tambient",      this.Tambient);
         this.syncUserUniforms(this.advect_program);
 
         this.fbo.bind();
@@ -496,7 +479,7 @@ Solver.prototype.step = function()
         this.project_program.uniform3Fv("L",           this.domain.L);
         this.project_program.uniformF("dL",            this.domain.dL);
         this.project_program.uniformF("timestep",  this.settings.timestep);
-        this.project_program.uniformF("expansion", this.expansion);
+        this.project_program.uniformF("expansion", this.settings.expansion);
         this.syncUserUniforms(this.project_program);
 
         // Update pressure field by Jacobi iteration
@@ -562,8 +545,6 @@ Solver.prototype.step = function()
     }
 
     gl.bindTexture(gl.TEXTURE_2D, null);
-    this.fbo.detachTexture(0);
-    this.fbo.unbind();
 
     /*
     this.fbo.bind();

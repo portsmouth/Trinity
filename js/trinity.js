@@ -274,12 +274,21 @@ Trinity.prototype.get_state = function()
         collide_glsl: trinity.getGlsl('collide')
     };
 
+    // Extract user simulation settings from GUI parameters
+    let simulationParameters = {};
+    let simulation_folder = this.getGUI().simulationFolder;
+    if (simulation_folder != undefined)
+    {
+        simulationParameters = simulation_folder.parameters;
+    }
+
     let gui_settings = { visible: this.getGUI().visible };
-    let state = { R: this.renderer.settings,
-                  S: this.solver.settings,
-                  C: camera_settings,
-                  G: gui_settings,
-                  E: editor_settings };
+    let state = { RENDERER_STATE: this.renderer.settings,
+                  SOLVER_STATE:   this.solver.settings,
+                  SIMULATION_STATE: simulationParameters,
+                  CAMERA_STATE:   camera_settings,
+                  GUI_STATE:      gui_settings,
+                  EDITOR_STATE:   editor_settings };
 
     return state;
 }
@@ -303,7 +312,7 @@ Trinity.prototype.load_state = function(state)
     this.loading = true;
 
     // Load camera state
-    let camera_settings = state.C;
+    let camera_settings = state.CAMERA_STATE;
     let P = camera_settings.pos;
     let T = camera_settings.tar;
     let near = camera_settings.near;
@@ -317,33 +326,41 @@ Trinity.prototype.load_state = function(state)
     this.initial_camera_target = this.camControls.target.clone();
 
     // Load GUI settings
-    let gui_settings = state.G;
+    let gui_settings = state.GUI_STATE;
     if (gui_settings)
     {
         this.showGUI(gui_settings.visible);
     }
 
     // Load editor state
-    if (state.E.common_glsl  === undefined) state.E.common_glsl  = '';
-    if (state.E.initial_glsl === undefined) state.E.initial_glsl = '';
-    if (state.E.inject_glsl  === undefined) state.E.inject_glsl  = '';
-    if (state.E.advect_glsl  === undefined) state.E.advect_glsl  = '';
-    if (state.E.collide_glsl === undefined) state.E.collide_glsl = '';
-    trinity.getDoc('common').setValue(state.E.common_glsl);
-    trinity.getDoc('initial').setValue(state.E.initial_glsl);
-    trinity.getDoc('inject').setValue(state.E.inject_glsl);
-    trinity.getDoc('advect').setValue(state.E.advect_glsl);
-    trinity.getDoc('collide').setValue(state.E.collide_glsl);
+    if (state.EDITOR_STATE.common_glsl  === undefined) state.EDITOR_STATE.common_glsl  = '';
+    if (state.EDITOR_STATE.initial_glsl === undefined) state.EDITOR_STATE.initial_glsl = '';
+    if (state.EDITOR_STATE.inject_glsl  === undefined) state.EDITOR_STATE.inject_glsl  = '';
+    if (state.EDITOR_STATE.advect_glsl  === undefined) state.EDITOR_STATE.advect_glsl  = '';
+    if (state.EDITOR_STATE.collide_glsl === undefined) state.EDITOR_STATE.collide_glsl = '';
+    trinity.getDoc('common').setValue( state.EDITOR_STATE.common_glsl);
+    trinity.getDoc('initial').setValue(state.EDITOR_STATE.initial_glsl);
+    trinity.getDoc('inject').setValue( state.EDITOR_STATE.inject_glsl);
+    trinity.getDoc('advect').setValue( state.EDITOR_STATE.advect_glsl);
+    trinity.getDoc('collide').setValue(state.EDITOR_STATE.collide_glsl);
 
     // Load renderer state
-    this.renderer.settings = Object.assign(this.renderer.settings, state.R);
+    this.renderer.settings = Object.assign(this.renderer.settings, state.RENDERER_STATE);
 
     // Load solver state
-    let Nx = state.S.Nx;
-    let Ny = state.S.Ny;
-    let Nz = state.S.Nz;
+    let Nx = state.SOLVER_STATE.Nx;
+    let Ny = state.SOLVER_STATE.Ny;
+    let Nz = state.SOLVER_STATE.Nz;
     this.solver.resize(Nx, Ny, Nz);
-    this.solver.settings = Object.assign(this.solver.settings, state.S);
+    this.solver.settings = Object.assign(this.solver.settings, state.SOLVER_STATE);
+
+    // Load GUI simulation settings
+    if (!jQuery.isEmptyObject(state.SIMULATION_STATE))
+    {
+        let simulationParameters = {};
+        simulationParameters = Object.assign(simulationParameters, state.SIMULATION_STATE);
+        this.getGUI().simulationFolder = { parameters: simulationParameters };
+    }
 
     // Sync logic
     this.camControls.update();
