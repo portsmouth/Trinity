@@ -8,12 +8,26 @@ var Renderer = function()
     // Default user-adjustable properties
     this.settings = {};
 
-    this.settings.Nraymarch = 128;
+    // Raymarch resolution
+    this.settings.Nraymarch = 256;
+
+    // Lighting
+    this.settings.skyColor = [0.5, 0.5, 1.0];
+    this.settings.sunColor = [1.0, 1.0, 0.5];
+    this.settings.sunPower = 1.0;
+    this.settings.sunLatitude   = 60.0;
+    this.settings.sunLongitude  = 0.0;
+
+    // Tonemapping
     this.settings.exposure = -1.0;
     this.settings.gamma = 2.2;
-    this.settings.blackbodyEmission = -9.5;
-    this.settings.debrisExtinction = 20.0;
-    this.settings.TtoKelvin = 1.0;
+
+    // Phase function
+    this.settings.anisotropy = 0.0;
+
+    this.settings.blackbodyEmission = -9.5; // @todo: define in user code
+    this.settings.extinctionScale = 20.0;   // @todo: define in user code
+    this.settings.TtoKelvin = 1.0;          // @todo: define in user code
 
     // Internal buffers and programs
     this.boxVbo = null;
@@ -189,12 +203,31 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniformI("Nraymarch", this.settings.Nraymarch);
 
         // Physics
-        this.volumeProgram.uniformF("debrisExtinction", this.settings.debrisExtinction);
+        this.volumeProgram.uniformF("extinctionScale", this.settings.extinctionScale);
         this.volumeProgram.uniformF("blackbodyEmission", Math.pow(2.0, this.settings.blackbodyEmission));
         this.volumeProgram.uniformF("TtoKelvin", this.settings.TtoKelvin);
+        this.volumeProgram.uniformF("anisotropy", this.settings.anisotropy);
+
+        // Tonemapping
         this.volumeProgram.uniformF("exposure", this.settings.exposure);
         this.volumeProgram.uniformF("invGamma", 1.0/this.settings.gamma);
 
+        let latTheta = (90.0-this.settings.sunLatitude) * Math.PI/180.0;
+        let lonPhi = this.settings.sunLongitude * Math.PI/180.0;
+        let costheta = Math.cos(latTheta);
+        let sintheta = Math.sin(latTheta);
+        let cosphi = Math.cos(lonPhi);
+        let sinphi = Math.sin(lonPhi);
+        let x = sintheta * cosphi;
+        let z = sintheta * sinphi;
+        let y = costheta;
+        let sunDir = [x, y, z];
+
+        this.volumeProgram.uniform3Fv("skyColor", this.settings.skyColor);
+        this.volumeProgram.uniform3Fv("sunColor", this.settings.sunColor);
+        this.volumeProgram.uniformF("sunPower", this.settings.sunPower);
+        this.volumeProgram.uniform3Fv("sunDir", sunDir);
+  
         this.quadVbo.bind();
         this.quadVbo.draw(this.volumeProgram, gl.TRIANGLE_FAN);
     }

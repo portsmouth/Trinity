@@ -27,9 +27,18 @@ uniform float dL;
 uniform int Nraymarch;
 
 // Physics
-uniform float debrisExtinction;
+uniform float extinctionScale;
 uniform float blackbodyEmission;
 uniform float TtoKelvin;
+uniform float anisotropy;
+
+// Lighting
+uniform vec3 skyColor;
+uniform vec3 sunColor;
+uniform float sunPower;
+uniform vec3 sunDir;
+
+// Tonemapping
 uniform float exposure;
 uniform float invGamma;
 
@@ -41,7 +50,7 @@ uniform sampler2D Vair_sampler;   // 2, vec3 velocity field (for debug, for now)
 /////// output buffers ///////
 layout(location = 0) out vec4 gbuf_rad;
 
-#define DENOM_EPS 1.0e-7
+#define M_PI 3.141592653589793
 #define sort2(a,b) { vec3 tmp=min(a,b); b=a+b-tmp; a=tmp; }
 
 bool boundsIntersect( in vec3 rayPos, in vec3 rayDir, in vec3 bbMin, in vec3 bbMax,
@@ -56,6 +65,24 @@ bool boundsIntersect( in vec3 rayPos, in vec3 rayDir, in vec3 bbMin, in vec3 bbM
     t1 = min(min(hi.x, hi.y), hi.z);
     return hit;
 }
+
+float shadowHit(in vec3 rayPos, in vec3 rayDir, in vec3 bbMin, in vec3 bbMax)
+{
+    // (get first hit assuming rayPos is interior to the AABB)
+    vec3 dX = vec3(1.0f/rayDir.x, 1.0f/rayDir.y, 1.0f/rayDir.z);
+    vec3 lo = (bbMin - rayPos) * dX;
+    vec3 hi = (bbMax - rayPos) * dX;
+    sort2(lo, hi);
+    return min(min(hi.x, hi.y), hi.z);
+}
+
+/*
+bool inBounds(in vec3 pos, in vec3 bbMin, in vec3 bbMax)
+{
+    vec3 s = step(bbMin, pos) - step(bbMax, pos);
+    return bool(s.x * s.y * s.z);
+}
+*/
 
 void constructPrimaryRay(in vec2 frag,
                          inout vec3 rayPos, inout vec3 rayDir)
@@ -141,43 +168,89 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     return ivec2(ui, vi);
 }
 
+
+vec3 sun_transmittance(in vec3 pos, float stepSize)
+{
+    vec3 Tr = vec3(1.0); // transmittance
+    float t = shadowHit(pos, sunDir, volMin, volMax);
+    int numSteps = int(floor(t/(4.0*stepSize)));
+    for (int n=0; n<256; ++n)
+    {
+        if (n>=numSteps) break;
+        float tmin = float(n)*stepSize;
+        float tmax = min(tmin + stepSize, t);
+        float dt = tmax - tmin;
+        float tmid = 0.5*(tmin + tmax);
+        vec3 pMarch = pos + tmid*sunDir;
+        vec3 wsP = pMarch - volMin; // transform pMarch into simulation domain:
+        vec3 debrisExtinction = interp(debris_sampler, clampToBounds(wsP)).rgb;
+        vec3 sigma_t = debrisExtinction * extinctionScale;
+        Tr *= exp(-sigma_t*dt); // transmittance over step
+    }
+    return Tr;
+}
+
+float phaseFunction(float mu)
+{
+    float g = anisotropy;
+    float gSqr = g*g;
+    return (1.0/(4.0*M_PI)) * (1.0 - gSqr) / pow(1.0 - 2.0*g*mu + gSqr, 1.5);
+}
+
+
 void main()
 {
     vec2 frag = gl_FragCoord.xy;
     vec3 rayPos, rayDir;
     constructPrimaryRay(frag, rayPos, rayDir);
 
+    float lengthScale = length(volMax - volMin);
+    float stepSize = lengthScale / float(Nraymarch);
+
     vec3 L = vec3(0.0);
-    vec3 Lbackground = vec3(0.2, 0.25, 0.5);
-    vec3 Tr = vec3(1.0); // transmittance
+    vec3 Lbackground = skyColor;
+    vec3 Tr = vec3(1.0); // transmittance along camera ray
 
     // intersect ray with volume bounds
     float t0, t1;
     if ( boundsIntersect(rayPos, rayDir, volMin, volMax, t0, t1) )
     {
-        // Raymarch
-        float dl = (t1 - t0) / float(Nraymarch);
-        vec3 pMarch = rayPos + (t0+0.5*dl)*rayDir;
+        float t01 = t1 - t0;
+        int numSteps = 1 + int(floor(t01/stepSize));
+        numSteps = min(256, numSteps);
 
-        for (int n=0; n<Nraymarch; ++n)
+        for (int n=0; n<1024; ++n)
         {
-            // transform pMarch into simulation domain:
-            vec3 wsP = pMarch - volMin;
+            if (n>=numSteps)
+                break;
+            float tmin = t0 + float(n)*stepSize;
+            float tmax = min(tmin + stepSize, t1);
+            float dt = tmax - tmin;
+            float tmid = 0.5*(tmin + tmax);
+            vec3 pMarch = rayPos + tmid*rayDir;
 
-            // Absorption by dust
-            vec3 debris = interp(debris_sampler, clampToBounds(wsP)).rgb;
-            vec3 sigma = debrisExtinction * debris;
-            Tr.r *= exp(-sigma.r*dl);
-            Tr.g *= exp(-sigma.g*dl);
-            Tr.b *= exp(-sigma.b*dl);
+            vec3 wsP = pMarch - volMin; // transform pMarch into simulation domain:
+
+            // Dust extinction and albedo at step midpoints
+            vec3 debrisExtinction = interp(debris_sampler, clampToBounds(wsP)).rgb;
+            vec3 debrisAlbedo = vec3(0.5, 0.5, 0.5); // @todo: take from simulation
+            vec3 sigma_t = debrisExtinction * extinctionScale;
+
+            // Incident sunlight radiance at scattering point
+            vec3 Li = sunPower * sunColor * sun_transmittance(pMarch, stepSize);
+
+            vec3 dTr = exp(-sigma_t*dt); // transmittance over step
+            vec3 J = Li * debrisAlbedo * Tr * (vec3(1.0) - dTr); // scattering term integrated over step, assuming constant Li
+            L += J * phaseFunction(dot(sunDir, rayDir));
 
             // Emit blackbody radiation from hot air
             float T = interp(Tair_sampler, clampToBounds(wsP)).r;
-
             vec3 blackbody_color = tempToRGB(T * TtoKelvin);
-            vec3 emission = pow(blackbodyEmission*T, 4.0) * blackbody_color * Tr;
-            L += emission * dl;
-            pMarch += rayDir*dl;
+            vec3 emission = pow(blackbodyEmission*T, 4.0) * blackbody_color;
+            L += Tr * emission * dt;
+
+            // Update transmittance for start of next step
+            Tr *= dTr;
         }
     }
 

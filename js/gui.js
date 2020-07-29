@@ -120,9 +120,11 @@ GUI.prototype.generateSimulationSettings = function()
                         if (typeof bind_object.max == 'number') max_val = bind_object.max;
                         if (typeof bind_object.step == 'number') step_val = bind_object.step;
                         simulationFolder.parameters[param_name] = param_default;
+                        let syncToShader = true;
                         GUI.addSlider(simulationFolder.parameters,
                                                    {name: param_name, min: min_val, max: max_val, step: step_val},
-                                                   simulationFolder);
+                                                   simulationFolder,
+                                                   syncToShader);
                         SOLVER.syncFloatToShader(param_name, param_default);
                     }
                     else if (Array.isArray(param_default) && param_default.length==3)
@@ -132,10 +134,12 @@ GUI.prototype.generateSimulationSettings = function()
                         if (typeof bind_object.scale == 'number')
                             scale = bind_object.scale;
                         simulationFolder.parameters[param_name] = param_default;
+                        let syncToShader = true;
                         GUI.addColor(simulationFolder.parameters,
                                                   param_name,
                                                   scale,
-                                                  simulationFolder);
+                                                  simulationFolder, 
+                                                  syncToShader);
                         SOLVER.syncColorToShader(param_name, param_default);
                     }
                 }
@@ -208,15 +212,60 @@ GUI.prototype.createRendererSettings = function()
 
     this.rendererFolder.add(renderer.settings, 'Nraymarch', 32, 1024);
     this.rendererFolder.add(renderer.settings, 'exposure', -10.0, 10.0);
+    this.rendererFolder.add(renderer.settings, 'anisotropy', -1.0, 1.0);
     this.rendererFolder.add(renderer.settings, 'gamma', 1.0, 3.0);
-    this.rendererFolder.add(renderer.settings, 'debrisExtinction', 0.0, 100.0);
+    this.rendererFolder.add(renderer.settings, 'extinctionScale', 0.0, 100.0);
     this.rendererFolder.add(renderer.settings, 'blackbodyEmission', -20.0, 20.0);
     this.rendererFolder.add(renderer.settings, 'TtoKelvin', 0.0, 10.0);
+
+    this.rendererFolder.add(renderer.settings, 'sunLatitude', -90.0, 90.0).onChange(  function() { } );
+    this.rendererFolder.add(renderer.settings, 'sunLongitude', 0.0, 360.0).onChange(  function() { } );
+    this.rendererFolder.add(renderer.settings, 'sunPower', 0.0, 10.0).onChange(       function() { } );
+
+    this.rendererFolder.sunColor = [renderer.settings.sunColor[0]*255.0,
+                                    renderer.settings.sunColor[1]*255.0,
+                                    renderer.settings.sunColor[2]*255.0];
+    let sunColorItem = this.rendererFolder.addColor(this.rendererFolder, 'sunColor');
+    sunColorItem.onChange( function(C) {
+                            if (typeof C==='string' || C instanceof String)
+                            {
+                                var color = hexToRgb(C);
+                                renderer.settings.sunColor[0] = color.r / 255.0;
+                                renderer.settings.sunColor[1] = color.g / 255.0;
+                                renderer.settings.sunColor[2] = color.b / 255.0;
+                            }
+                            else
+                            {
+                                renderer.settings.sunColor[0] = C[0] / 255.0;
+                                renderer.settings.sunColor[1] = C[1] / 255.0;
+                                renderer.settings.sunColor[2] = C[2] / 255.0;
+                            }
+                        } );
+
+    this.rendererFolder.skyColor = [renderer.settings.skyColor[0]*255.0,
+                                    renderer.settings.skyColor[1]*255.0,
+                                    renderer.settings.skyColor[2]*255.0];
+    let skyColorItem = this.rendererFolder.addColor(this.rendererFolder, 'skyColor');
+    skyColorItem.onChange( function(C) {
+                            if (typeof C==='string' || C instanceof String)
+                            {
+                                var color = hexToRgb(C);
+                                renderer.settings.skyColor[0] = color.r / 255.0;
+                                renderer.settings.skyColor[1] = color.g / 255.0;
+                                renderer.settings.skyColor[2] = color.b / 255.0;
+                            }
+                            else
+                            {
+                                renderer.settings.skyColor[0] = C[0] / 255.0;
+                                renderer.settings.skyColor[1] = C[1] / 255.0;
+                                renderer.settings.skyColor[2] = C[2] / 255.0;
+                            }
+                        } );
 
 	this.rendererFolder.close();
 }
 
-GUI.prototype.addSlider = function(parameters, param, folder=undefined)
+GUI.prototype.addSlider = function(parameters, param, folder=undefined, syncToShader=false)
 {
 	let _f = this.userFolder;
 	if (typeof folder !== 'undefined') _f = folder;
@@ -228,11 +277,11 @@ GUI.prototype.addSlider = function(parameters, param, folder=undefined)
 	if (step==null || step==undefined) { item = _f.add(parameters, name, min, max, step); }
 	else                               { item = _f.add(parameters, name, min, max);       }
 	item.onChange( function(value) { trinity.camera.enabled = false; } );
-	item.onFinishChange( function(value) { trinity.getSolver().syncFloatToShader(name, value); trinity.camera.enabled = true; } );
+	item.onFinishChange( function(value) { if (syncToShader) trinity.getSolver().syncFloatToShader(name, value); trinity.camera.enabled = true; } );
 	return item;
 }
 
-GUI.prototype.addColor = function(parameters, name, scale=1.0, folder=undefined)
+GUI.prototype.addColor = function(parameters, name, scale=1.0, folder=undefined, syncToShader=false)
 {
 	let _f = this.userFolder;
 	if (typeof folder !== 'undefined') _f = folder;
@@ -252,7 +301,7 @@ GUI.prototype.addColor = function(parameters, name, scale=1.0, folder=undefined)
 									parameters[name][1] = scale * color[1] / 255.0;
 									parameters[name][2] = scale * color[2] / 255.0;
 								}
-								trinity.getSolver().syncColorToShader(name, parameters[name]);
+								if (syncToShader) trinity.getSolver().syncColorToShader(name, parameters[name]);
 							} );
 	return item;
 }
