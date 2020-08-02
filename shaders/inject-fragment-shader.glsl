@@ -12,16 +12,19 @@ uniform float dL;
 
 // Physics
 uniform float time;
+uniform float timestep;
 
 /////// input buffers ///////
-uniform sampler2D Vair_sampler;      // 0, vec3 air velocity field
-uniform sampler2D Tair_sampler;      // 2, float air temperature field
-uniform sampler2D debris_sampler;    // 3, float debris density field
+uniform sampler2D Vair_sampler;       // 0, vec3 air velocity field
+uniform sampler2D Tair_sampler;       // 1, float air temperature field
+uniform sampler2D absorption_sampler; // 2, vec3 absorption field
+uniform sampler2D scattering_sampler; // 3, vec3 scattering field
 
 /////// output buffers ///////
 layout(location = 0) out vec4 Vair_output;
 layout(location = 1) out vec4 Tair_output;
-layout(location = 2) out vec4 debris_output;
+layout(location = 2) out vec4 absorption_output;
+layout(location = 3) out vec4 scattering_output;
 
 /////////////////////// user-defined code ///////////////////////
 _USER_CODE_
@@ -61,26 +64,37 @@ void main()
     {
         Vair_output   = texelFetch(Vair_sampler, frag, 0);
         Tair_output   = texelFetch(Tair_sampler, frag, 0);
-        debris_output = texelFetch(debris_sampler, frag, 0);
+        absorption_output = texelFetch(absorption_sampler, frag, 0);
+        scattering_output = texelFetch(scattering_sampler, frag, 0);
     }
     else
     {
         // Get current velocity, temperature, and debris fields:
         vec3  v = texelFetch(Vair_sampler, frag, 0).rgb;
         float T = texelFetch(Tair_sampler, frag, 0).x;
-        float E = texelFetch(debris_sampler, frag, 0).x;
+        vec3 absorption = texelFetch(absorption_sampler, frag, 0).rgb;
+        vec3 scattering = texelFetch(scattering_sampler, frag, 0).rgb;
 
         // Inject mass and modify temperature:
-        vec3 dv;
-        vec3 drho, albedo;
+        float Tinflow = 0.0;
+        vec3 vInflow          = vec3(0.0);
+        vec3 absorptionInflow = vec3(0.0);
+        vec3 scatteringInflow = vec3(0.0);
+
         inject(wsP, time, L,
-               dv, T, drho, albedo);
+               v, vInflow,
+               T, Tinflow,
+               absorption, absorptionInflow,
+               scattering, scatteringInflow);
 
-        v += dv;
-        E += drho.r; // @todo: mix injected debris extinction/albedo into current medium of voxel
+        v += vInflow * timestep;
+        T += Tinflow * timestep;
+        absorption += absorptionInflow*timestep;
+        scattering += scatteringInflow*timestep;
 
-        Vair_output   = vec4(v, 0.0);
-        Tair_output   = vec4(T);
-        debris_output = vec4(E);
+        Vair_output       = vec4(v, 0.0);
+        Tair_output       = vec4(vec3(T), 0.0);
+        absorption_output = vec4(absorption, 0.0);
+        scattering_output = vec4(scattering, 0.0);
     }
 }

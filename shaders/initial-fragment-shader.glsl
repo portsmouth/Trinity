@@ -14,7 +14,8 @@ uniform float dL;
 layout(location = 0) out vec4 Vair_output;
 layout(location = 1) out vec4 Pair_output;
 layout(location = 2) out vec4 Tair_output;
-layout(location = 3) out vec4 debris_output;
+layout(location = 3) out vec4 absorption_output;
+layout(location = 4) out vec4 scattering_output;
 
 /////////////////////// user-defined code ///////////////////////
 _USER_CODE_
@@ -45,13 +46,14 @@ void main()
 
     vec3 v;
     float T;
-    vec3 E; // debris extinction
-    vec3 A; // debris albedo
+    vec3 absorption;
+    vec3 scattering;
     initial_conditions(wsP, L,
-                       v, T, E, A);
+                       v, T, absorption, scattering);
 
     Vair_output   = vec4(v, 0.0);
     Pair_output   = vec4(0.0);
     Tair_output   = vec4(T);
-    debris_output = vec4(E, 0.0);
+    absorption_output = vec4(absorption, 0.0);
+    scattering_output = vec4(scattering, 0.0);
 }

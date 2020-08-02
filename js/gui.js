@@ -89,7 +89,7 @@ GUI.prototype.generateSimulationSettings = function()
     glsl += trinity.getGlsl('common') + '\n';
     glsl += trinity.getGlsl('initial') + '\n';
     glsl += trinity.getGlsl('inject') + '\n';
-    glsl += trinity.getGlsl('advect') + '\n';
+    glsl += trinity.getGlsl('influence') + '\n';
     glsl += trinity.getGlsl('collide') + '\n';
 
     // Parse code for uniform bindings:
@@ -211,16 +211,14 @@ GUI.prototype.createRendererSettings = function()
     var camera = trinity.getCamera();
 
     this.rendererFolder.add(renderer.settings, 'Nraymarch', 32, 1024);
-    this.rendererFolder.add(renderer.settings, 'exposure', -10.0, 10.0);
+    this.rendererFolder.add(renderer.settings, 'extinctionScale', -6.0, 6.0);
+    this.rendererFolder.add(renderer.settings, 'emissionScale', -10.0, 10.0);
     this.rendererFolder.add(renderer.settings, 'anisotropy', -1.0, 1.0);
+    this.rendererFolder.add(renderer.settings, 'exposure', -10.0, 10.0);
     this.rendererFolder.add(renderer.settings, 'gamma', 1.0, 3.0);
-    this.rendererFolder.add(renderer.settings, 'extinctionScale', 0.0, 100.0);
-    this.rendererFolder.add(renderer.settings, 'blackbodyEmission', -20.0, 20.0);
-    this.rendererFolder.add(renderer.settings, 'TtoKelvin', 0.0, 10.0);
-
     this.rendererFolder.add(renderer.settings, 'sunLatitude', -90.0, 90.0).onChange(  function() { } );
     this.rendererFolder.add(renderer.settings, 'sunLongitude', 0.0, 360.0).onChange(  function() { } );
-    this.rendererFolder.add(renderer.settings, 'sunPower', 0.0, 10.0).onChange(       function() { } );
+    this.rendererFolder.add(renderer.settings, 'sunPower', -3.0, 3.0).onChange(       function() { } );
 
     this.rendererFolder.sunColor = [renderer.settings.sunColor[0]*255.0,
                                     renderer.settings.sunColor[1]*255.0,

@@ -426,7 +426,7 @@ var gl;
     // GLU.Texture object
     ///////////////////////////////////////////////////
 
-    this.Texture = function(width, height, channels, isFloat, isLinear, isClamped, texels) 
+    this.Texture = function(width, height, channels, isFloat, isLinear, isClamped, texels)
     {
         this.width  = width;
         this.height = height;
@@ -439,10 +439,10 @@ var gl;
         this.glName = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, this.glName);
         gl.texImage2D(gl.TEXTURE_2D, 0, this.internalformat, this.width, this.height, 0, this.format, this.type, texels);
-        
-        //if (texels !== null) 
+
+        //if (texels !== null)
         this.setFilter();
-        
+
         this.boundUnit = -1;
     }
 

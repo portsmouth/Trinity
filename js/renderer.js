@@ -25,9 +25,9 @@ var Renderer = function()
     // Phase function
     this.settings.anisotropy = 0.0;
 
-    this.settings.blackbodyEmission = -9.5; // @todo: define in user code
-    this.settings.extinctionScale = 20.0;   // @todo: define in user code
-    this.settings.TtoKelvin = 1.0;          // @todo: define in user code
+    // Tweak factors
+    this.settings.extinctionScale = 0.0;
+    this.settings.emissionScale = 3.0;
 
     // Internal buffers and programs
     this.boxVbo = null;
@@ -47,7 +47,6 @@ var Renderer = function()
     this._height = render_canvas.height;
 
     this.compiled_successfully = false;
-    this.compileShaders();
 
      // Trigger initial buffer generation
     this.resize(this._width, this._height);
@@ -129,10 +128,15 @@ Renderer.prototype.setBounds = function(domain)
 
 Renderer.prototype.compileShaders = function()
 {
-    if (this.compiled_successfully)
-        return;
+    console.warn("[Trinity] Renderer.prototype.compileShaders");
 
-    this.volumeProgram  = new GLU.Shader('volume',  this.shaderSources, null);
+    let common_glsl  = trinity.getGlsl('common') + '\n';
+    let render_glsl = common_glsl + trinity.getGlsl('render');
+
+    trinity.show_errors();
+    this.compiled_successfully = false;
+
+    this.volumeProgram  = new GLU.Shader('volume',  this.shaderSources, { _USER_CODE_: render_glsl });
     if (!this.volumeProgram.program) { this.volumeProgram = null; return; }
 
     this.lineProgram    = new GLU.Shader('line',    this.shaderSources, null);
@@ -142,11 +146,14 @@ Renderer.prototype.compileShaders = function()
     if (!this.tonemapProgram.program) { this.tonemapProgram = null; return; }
 
     this.compiled_successfully = true;
+    trinity.hide_errors();
 }
 
 Renderer.prototype.render = function(solver)
 {
     // @todo:  render only on dirty
+    if (!this.compiled_successfully)
+        return;
 
 	let gl = GLU.gl;
 
@@ -164,20 +171,24 @@ Renderer.prototype.render = function(solver)
     camX.crossVectors(camUp, camDir);
 
     let domain = solver.getDomain();
-    let Vair   = solver.getVair();    // (the air velocity texture)
-    let Tair   = solver.getTair();    // (the air temperature texture)
-    let debris = solver.getDebris(); // (the debris density texture)
+    let Tair   = solver.getTair();           // (the air temperature texture)
+    let absorption = solver.getAbsorption(); // (the absorption texture)
+    let scattering = solver.getScattering(); // (the scattering texture)
 
     // Volume render
     {
         this.volumeProgram.bind();
 
-        debris.bind(0);
-        Tair.bind(1);
-        Vair.bind(2);
-        this.volumeProgram.uniformTexture("debris_sampler", debris);
+        // Bind textures for air temperature and medium absorption/scattering
+        absorption.bind(0);
+        scattering.bind(1);
+        Tair.bind(2);
+        this.volumeProgram.uniformTexture("absorption_sampler", absorption);
+        this.volumeProgram.uniformTexture("scattering_sampler", scattering);
         this.volumeProgram.uniformTexture("Tair_sampler", Tair);
-        this.volumeProgram.uniformTexture("Vair_sampler", Vair);
+
+        // sync UI-bound user-code uniforms to the volume program
+        trinity.getSolver().syncUserUniforms(this.volumeProgram);
 
         // Camera
         this.volumeProgram.uniform2Fv("resolution", [this._width, this._height]);
@@ -203,10 +214,9 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniformI("Nraymarch", this.settings.Nraymarch);
 
         // Physics
-        this.volumeProgram.uniformF("extinctionScale", this.settings.extinctionScale);
-        this.volumeProgram.uniformF("blackbodyEmission", Math.pow(2.0, this.settings.blackbodyEmission));
-        this.volumeProgram.uniformF("TtoKelvin", this.settings.TtoKelvin);
         this.volumeProgram.uniformF("anisotropy", this.settings.anisotropy);
+        this.volumeProgram.uniformF("extinctionScale", Math.pow(10.0, this.settings.extinctionScale));
+        this.volumeProgram.uniformF("emissionScale", Math.pow(10.0, this.settings.emissionScale));
 
         // Tonemapping
         this.volumeProgram.uniformF("exposure", this.settings.exposure);
@@ -225,9 +235,9 @@ Renderer.prototype.render = function(solver)
 
         this.volumeProgram.uniform3Fv("skyColor", this.settings.skyColor);
         this.volumeProgram.uniform3Fv("sunColor", this.settings.sunColor);
-        this.volumeProgram.uniformF("sunPower", this.settings.sunPower);
+        this.volumeProgram.uniformF("sunPower", Math.pow(10.0, this.settings.sunPower));
         this.volumeProgram.uniform3Fv("sunDir", sunDir);
-  
+
         this.quadVbo.bind();
         this.quadVbo.draw(this.volumeProgram, gl.TRIANGLE_FAN);
     }

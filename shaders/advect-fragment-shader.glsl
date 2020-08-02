@@ -18,17 +18,19 @@ uniform float vorticity_scale;
 in vec2 v_texcoord;
 
 /////// input buffers ///////
-uniform sampler2D Vair_sampler;      // 0, vec3 air velocity field
-uniform sampler2D Pair_sampler;      // 1, float air pressure field
-uniform sampler2D Tair_sampler;      // 2, float air temperature field
-uniform sampler2D debris_sampler;    // 3, float debris density field
-uniform sampler2D vorticity_sampler; // 4, vec3 air vorticity field
+uniform sampler2D Vair_sampler;       // 0, vec3 air velocity field
+uniform sampler2D Pair_sampler;       // 1, float air pressure field
+uniform sampler2D Tair_sampler;       // 2, float air temperature field
+uniform sampler2D absorption_sampler; // 3, vec3 absorption field
+uniform sampler2D scattering_sampler; // 4, vec3 scattering field
+uniform sampler2D vorticity_sampler;  // 5, vec3 air vorticity field
 
 /////// output buffers ///////
 layout(location = 0) out vec4 Vair_output;
 layout(location = 1) out vec4 Pair_output;
 layout(location = 2) out vec4 Tair_output;
-layout(location = 3) out vec4 debris_output;
+layout(location = 3) out vec4 absorption_output;
+layout(location = 4) out vec4 scattering_output;
 
 /////////////////////// user-defined code ///////////////////////
 _USER_CODE_
@@ -147,10 +149,11 @@ void main()
 
     if (isSolidCell(vsPi))
     {
-        Vair_output   = texelFetch(Vair_sampler, frag, 0);
-        Pair_output   = texelFetch(Pair_sampler, frag, 0);
-        Tair_output   = texelFetch(Tair_sampler, frag, 0);
-        debris_output = texelFetch(debris_sampler, frag, 0);
+        Vair_output       = texelFetch(Vair_sampler, frag, 0);
+        Pair_output       = texelFetch(Pair_sampler, frag, 0);
+        Tair_output       = texelFetch(Tair_sampler, frag, 0);
+        absorption_output = texelFetch(absorption_sampler, frag, 0);
+        scattering_output = texelFetch(scattering_sampler, frag, 0);
     }
     else
     {
@@ -158,22 +161,24 @@ void main()
         vec3 v0 = texelFetch(Vair_sampler, frag, 0).xyz;
         vec3 wsP = vsP*dL;
         vec3 wsPp = back_advect(wsP, v0, timestep);
-        vec3  v      = interp(Vair_sampler, wsPp).rgb;
-        float P      = interp(Pair_sampler, wsPp).x;
-        float T      = interp(Tair_sampler, wsPp).x;
-        float debris = interp(debris_sampler, wsPp).x;
+        vec3  v         = interp(Vair_sampler, wsPp).rgb;
+        float P         = interp(Pair_sampler, wsPp).x;
+        float T         = interp(Tair_sampler, wsPp).x;
+        vec3 absorption = interp(absorption_sampler, wsPp).rgb;
+        vec3 scattering = interp(scattering_sampler, wsPp).rgb;
 
         // Apply external forces
-        v += timestep * externalForces(wsP, v, P, T, L);
+        v += timestep * externalForces(wsP, time, v, P, T, L);
 
         // Apply vorticity confinement:
-        // @todo (only if vorticity confinement enabled)
-        v += timestep * vorticityConfinementForce(frag, vsPi);
+        if (vorticity_scale > 0.0)
+            v += timestep * vorticityConfinementForce(frag, vsPi);
 
-        Vair_output   = vec4(v, 0.0);
-        Pair_output   = vec4(P);
-        Tair_output   = vec4(T);
-        debris_output = vec4(debris);
+        Vair_output       = vec4(v, 0.0);
+        Pair_output       = vec4(vec3(P), 0.0);
+        Tair_output       = vec4(vec3(T), 0.0);
+        absorption_output = vec4(absorption, 0.0);
+        scattering_output = vec4(scattering, 0.0);
     }
 }
 

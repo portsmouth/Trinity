@@ -69,16 +69,15 @@ Solver.prototype.compileShaders = function()
 
     let common_glsl  = trinity.getGlsl('common') + '\n';
     let collide_glsl = common_glsl + trinity.getGlsl('collide')  + '\n';
-
     let initial_glsl = common_glsl + trinity.getGlsl('initial');
     let inject_glsl  = collide_glsl + trinity.getGlsl('inject');
-    let advect_glsl  = collide_glsl + trinity.getGlsl('advect');
+    let influence_glsl  = collide_glsl + trinity.getGlsl('influence');
 
     this.uniforms_float = {};
     this.uniforms_vec3 = {};
 
     trinity.getGUI().refresh();
-
+    trinity.show_errors();
     this.compiled_successfully = false;
 
     this.initial_program   = new GLU.Shader('initial',    this.shaderSources,  { _USER_CODE_: initial_glsl });
@@ -87,7 +86,7 @@ Solver.prototype.compileShaders = function()
     this.inject_program       = new GLU.Shader('inject',        this.shaderSources,  { _USER_CODE_: inject_glsl });
     if (!this.inject_program.program) { this.inject_program = null; return; }
 
-    this.advect_program       = new GLU.Shader('advect',        this.shaderSources,  { _USER_CODE_: advect_glsl });
+    this.advect_program       = new GLU.Shader('advect',     this.shaderSources,  { _USER_CODE_: influence_glsl });
     if (!this.advect_program.program) { this.advect_program = null; return; }
 
     this.project_program      = new GLU.Shader('project',       this.shaderSources,  { _USER_CODE_: collide_glsl });
@@ -109,18 +108,9 @@ Solver.prototype.compileShaders = function()
     trinity.hide_errors();
 }
 
-Solver.prototype.updateShaders = function()
-{
-    console.warn("[Trinity] Solver.prototype.reset");
-
-    this.compileShaders();
-    if (!this.compiled_successfully)
-        return;
-}
-
 Solver.prototype.getDomain = function()
 {
-	return this.domain;
+    return this.domain;
 }
 
 Solver.prototype.pauseToggle = function()
@@ -160,7 +150,8 @@ Solver.prototype.resize = function(Nx, Ny, Nz)
     let divVair0  = new Float32Array(W*H*4);  // air velocity divergence field
     let Pair0     = new Float32Array(W*H*4);  // air pressure field
     let Tair0     = new Float32Array(W*H*4);  // air temperature field
-    let debris0   = new Float32Array(W*H*4);  // debris extinction field
+    let absorption0   = new Float32Array(W*H*4);  // absorption field
+    let scattering0   = new Float32Array(W*H*4);  // scattering field
     let vorticity = new Float32Array(W*H*4);  // vorticity field
 
     let dL = 1.0; // voxel size in world units
@@ -169,24 +160,22 @@ Solver.prototype.resize = function(Nx, Ny, Nz)
     let L = [dL*Nx, dL*Ny, dL*Nz];
     this.L = L;
 
-    // Initial velocity texture
     this.Vair = [ new GLU.Texture(W, H, 4, true, true, true, Vair0),
                   new GLU.Texture(W, H, 4, true, true, true, Vair0) ];
 
-    // Initial velocity divergence texture
     this.divVair = new GLU.Texture(W, H, 4, true, true, true, divVair0);
 
-    // Initial pressure texture
     this.Pair = [ new GLU.Texture(W, H, 4, true, true, true, Pair0),
                   new GLU.Texture(W, H, 4, true, true, true, Pair0) ];
 
-    // Initial temperature texture
     this.Tair = [ new GLU.Texture(W, H, 4, true, true, true, Tair0),
                   new GLU.Texture(W, H, 4, true, true, true, Tair0) ];
 
-    // Initial debris texture
-    this.debris = [ new GLU.Texture(W, H, 4, true, true, true, debris0),
-                    new GLU.Texture(W, H, 4, true, true, true, debris0) ];
+    this.absorption = [ new GLU.Texture(W, H, 4, true, true, true, absorption0),
+                        new GLU.Texture(W, H, 4, true, true, true, absorption0) ];
+
+    this.scattering = [ new GLU.Texture(W, H, 4, true, true, true, scattering0),
+                        new GLU.Texture(W, H, 4, true, true, true, scattering0) ];
 
     this.vorticity = new GLU.Texture(W, H, 4, true, true, true, vorticity);
 
@@ -239,10 +228,14 @@ Solver.prototype.getTair = function()
 	return this.Tair[0];
 }
 
-// debris density texture
-Solver.prototype.getDebris = function()
+Solver.prototype.getAbsorption = function()
 {
-	return this.debris[0];
+	return this.absorption[0];
+}
+
+Solver.prototype.getScattering = function()
+{
+	return this.scattering[0];
 }
 
 Solver.prototype.step = function()
@@ -278,20 +271,22 @@ Solver.prototype.step = function()
         this.syncUserUniforms(this.initial_program);
 
         this.fbo.bind();
-        this.fbo.drawBuffers(4);
-        this.fbo.attachTexture(this.Vair[0], 0);   // write to  Vair[0]
-        this.fbo.attachTexture(this.Pair[0], 1);   // write to  Pair[0]
-        this.fbo.attachTexture(this.Tair[0], 2);   // write to  Tair[0]
-        this.fbo.attachTexture(this.debris[0], 3); // write to  debris[0]
+        this.fbo.drawBuffers(5);
+        this.fbo.attachTexture(this.Vair[0], 0);       // write to  Vair[0]
+        this.fbo.attachTexture(this.Pair[0], 1);       // write to  Pair[0]
+        this.fbo.attachTexture(this.Tair[0], 2);       // write to  Tair[0]
+        this.fbo.attachTexture(this.absorption[0], 3); // write to absorption[0]
+        this.fbo.attachTexture(this.scattering[0], 4); // write to scattering[0]
         this.quadVbo.draw(this.advect_program, gl.TRIANGLE_FAN);
         this.fbo.detachTexture(0);
         this.fbo.detachTexture(1);
         this.fbo.detachTexture(2);
         this.fbo.detachTexture(3);
+        this.fbo.detachTexture(4);
         this.fbo.unbind();
     }
 
-    // Inject fresh mass and heat:
+    // Inject fresh mass, heat and medium:
     {
         this.inject_program.bind();
         this.inject_program.uniformI("Nx",             this.domain.Nx);
@@ -303,23 +298,28 @@ Solver.prototype.step = function()
         this.inject_program.uniform3Fv("L",            this.domain.L);
         this.inject_program.uniformF("dL",             this.domain.dL);
         this.inject_program.uniformF("time",           this.time);
+        this.inject_program.uniformF("timestep",       this.settings.timestep);
         this.syncUserUniforms(this.inject_program);
 
         this.fbo.bind();
-        this.fbo.drawBuffers(3);
-        this.fbo.attachTexture(this.Vair[1], 0);   // write to  Vair[1]
-        this.fbo.attachTexture(this.Tair[1], 1);   // write to  Tair[1]
-        this.fbo.attachTexture(this.debris[1], 2); // write to  debris[1]
-        this.Vair[0].bind(0);                    // read from Vair[0]
-        this.Tair[0].bind(1);                    // read from Tair[0]
-        this.debris[0].bind(2);                  // read from debris[0]
+        this.fbo.drawBuffers(4);
+        this.fbo.attachTexture(this.Vair[1], 0);       // write to  Vair[1]
+        this.fbo.attachTexture(this.Tair[1], 1);       // write to  Tair[1]
+        this.fbo.attachTexture(this.absorption[1], 2); // write to  absorption[1]
+        this.fbo.attachTexture(this.scattering[1], 3); // write to  scattering[1]
+        this.Vair[0].bind(0);                          // read from Vair[0]
+        this.Tair[0].bind(1);                          // read from Tair[0]
+        this.absorption[0].bind(2);                    // read from absorption[0]
+        this.scattering[0].bind(3);                    // read from scattering[0]
         this.inject_program.uniformTexture("Vair_sampler", this.Vair[0]);
         this.inject_program.uniformTexture("Tair_sampler", this.Tair[0]);
-        this.inject_program.uniformTexture("debris_sampler", this.debris[0]);
+        this.inject_program.uniformTexture("absorption_sampler", this.absorption[0]);
+        this.inject_program.uniformTexture("scattering_sampler", this.scattering[0]);
         this.quadVbo.draw(this.advect_program, gl.TRIANGLE_FAN);
         this.fbo.detachTexture(0);
         this.fbo.detachTexture(1);
         this.fbo.detachTexture(2);
+        this.fbo.detachTexture(3);
         this.fbo.unbind();
 
         // copy velocity 1 -> 0
@@ -346,14 +346,26 @@ Solver.prototype.step = function()
         this.fbo.detachTexture(0);
         this.fbo.unbind();
 
-        // copy debris 1 -> 0
+        // copy absorption 1 -> 0
         // @todo: get rid of copy and do ping-pong
         this.copy_program.bind();
         this.fbo.bind();
         this.fbo.drawBuffers(1);
-        this.fbo.attachTexture(this.debris[0], 0); // write to  debris[0]
-        this.debris[1].bind(0);                    // read from debris[1]
-        this.copy_program.uniformTexture("Qin", this.Vair[1]);
+        this.fbo.attachTexture(this.absorption[0], 0); // write to  absorption[0]
+        this.absorption[1].bind(0);                    // read from absorption[1]
+        this.copy_program.uniformTexture("Qin", this.absorption[1]);
+        this.quadVbo.draw(this.copy_program, gl.TRIANGLE_FAN);
+        this.fbo.detachTexture(0);
+        this.fbo.unbind();
+
+        // copy scattering 1 -> 0
+        // @todo: get rid of copy and do ping-pong
+        this.copy_program.bind();
+        this.fbo.bind();
+        this.fbo.drawBuffers(1);
+        this.fbo.attachTexture(this.scattering[0], 0); // write to  scattering[0]
+        this.scattering[1].bind(0);                    // read from scattering[1]
+        this.copy_program.uniformTexture("Qin", this.scattering[1]);
         this.quadVbo.draw(this.copy_program, gl.TRIANGLE_FAN);
         this.fbo.detachTexture(0);
         this.fbo.unbind();
@@ -398,26 +410,30 @@ Solver.prototype.step = function()
         this.syncUserUniforms(this.advect_program);
 
         this.fbo.bind();
-        this.fbo.drawBuffers(4);
-        this.fbo.attachTexture(this.Vair[1], 0);   // write to  Vair[1]
-        this.fbo.attachTexture(this.Pair[1], 1);   // write to  Pair[1]
-        this.fbo.attachTexture(this.Tair[1], 2);   // write to  Tair[1]
-        this.fbo.attachTexture(this.debris[1], 3); // write to  debris[1]
+        this.fbo.drawBuffers(5);
+        this.fbo.attachTexture(this.Vair[1], 0);       // write to  Vair[1]
+        this.fbo.attachTexture(this.Pair[1], 1);       // write to  Pair[1]
+        this.fbo.attachTexture(this.Tair[1], 2);       // write to  Tair[1]
+        this.fbo.attachTexture(this.absorption[1], 3); // write to  absorption[1]
+        this.fbo.attachTexture(this.scattering[1], 4); // write to  scattering[1]
         this.Vair[0].bind(0);                    // read from Vair[0]
         this.Pair[0].bind(1);                    // read from Pair[0]
         this.Tair[0].bind(2);                    // read from Tair[0]
-        this.debris[0].bind(3);                  // read from debris[0]
-        this.vorticity.bind(4);                  // read from vorticity
+        this.absorption[0].bind(3);              // read from absorption[0]
+        this.scattering[0].bind(4);              // read from scattering[0]
+        this.vorticity.bind(5);                  // read from vorticity
         this.advect_program.uniformTexture("Vair_sampler", this.Vair[0]);
         this.advect_program.uniformTexture("Pair_sampler", this.Pair[0]);
         this.advect_program.uniformTexture("Tair_sampler", this.Tair[0]);
-        this.advect_program.uniformTexture("debris_sampler", this.debris[0]);
+        this.advect_program.uniformTexture("absorption_sampler", this.absorption[0]);
+        this.advect_program.uniformTexture("scattering_sampler", this.scattering[0]);
         this.advect_program.uniformTexture("vorticity_sampler", this.vorticity);
         this.quadVbo.draw(this.advect_program, gl.TRIANGLE_FAN);
         this.fbo.detachTexture(0);
         this.fbo.detachTexture(1);
         this.fbo.detachTexture(2);
         this.fbo.detachTexture(3);
+        this.fbo.detachTexture(4);
         this.fbo.unbind();
 
         // copy temperature 1 -> 0
@@ -432,14 +448,26 @@ Solver.prototype.step = function()
         this.fbo.detachTexture(0);
         this.fbo.unbind();
 
-        // copy density 1 -> 0
+        // copy absorption 1 -> 0
         // @todo: get rid of copy and do ping-pong
         this.copy_program.bind();
         this.fbo.bind();
         this.fbo.drawBuffers(1);
-        this.fbo.attachTexture(this.debris[0], 0); // write to  debris[0]
-        this.debris[1].bind(0);                    // read from debris[1]
-        this.copy_program.uniformTexture("Qin", this.debris[1]);
+        this.fbo.attachTexture(this.absorption[0], 0); // write to  absorption[0]
+        this.absorption[1].bind(0);                    // read from absorption[1]
+        this.copy_program.uniformTexture("Qin", this.absorption[1]);
+        this.quadVbo.draw(this.copy_program, gl.TRIANGLE_FAN);
+        this.fbo.detachTexture(0);
+        this.fbo.unbind();
+
+        // copy scattering 1 -> 0
+        // @todo: get rid of copy and do ping-pong
+        this.copy_program.bind();
+        this.fbo.bind();
+        this.fbo.drawBuffers(1);
+        this.fbo.attachTexture(this.scattering[0], 0); // write to  scattering[0]
+        this.scattering[1].bind(0);                    // read from scattering[1]
+        this.copy_program.uniformTexture("Qin", this.scattering[1]);
         this.quadVbo.draw(this.copy_program, gl.TRIANGLE_FAN);
         this.fbo.detachTexture(0);
         this.fbo.unbind();

@@ -21,17 +21,19 @@ uniform float vorticity_scale;
 in vec2 v_texcoord;
 
 /////// input buffers ///////
-uniform sampler2D Vair_sampler;      // 0, vec3 air velocity field
-uniform sampler2D Pair_sampler;      // 1, float air pressure field
-uniform sampler2D Tair_sampler;      // 2, float air temperature field
-uniform sampler2D debris_sampler;    // 3, float debris density field
-uniform sampler2D vorticity_sampler; // 4, vec3 air vorticity field
+uniform sampler2D Vair_sampler;       // 0, vec3 air velocity field
+uniform sampler2D Pair_sampler;       // 1, float air pressure field
+uniform sampler2D Tair_sampler;       // 2, float air temperature field
+uniform sampler2D absorption_sampler; // 3, vec3 absorption field
+uniform sampler2D scattering_sampler; // 4, vec3 scattering field
+uniform sampler2D vorticity_sampler;  // 5, vec3 air vorticity field
 
 /////// output buffers ///////
 layout(location = 0) out vec4 Vair_output;
 layout(location = 1) out vec4 Pair_output;
 layout(location = 2) out vec4 Tair_output;
-layout(location = 3) out vec4 debris_output;
+layout(location = 3) out vec4 absorption_output;
+layout(location = 4) out vec4 scattering_output;
 
 /////////////////////// user-defined code ///////////////////////
 _USER_CODE_
@@ -150,10 +152,11 @@ void main()
 
     if (isSolidCell(vsPi))
     {
-        Vair_output   = texelFetch(Vair_sampler, frag, 0);
-        Pair_output   = texelFetch(Pair_sampler, frag, 0);
-        Tair_output   = texelFetch(Tair_sampler, frag, 0);
-        debris_output = texelFetch(debris_sampler, frag, 0);
+        Vair_output       = texelFetch(Vair_sampler, frag, 0);
+        Pair_output       = texelFetch(Pair_sampler, frag, 0);
+        Tair_output       = texelFetch(Tair_sampler, frag, 0);
+        absorption_output = texelFetch(absorption_sampler, frag, 0);
+        scattering_output = texelFetch(scattering_sampler, frag, 0);
     }
     else
     {
@@ -161,22 +164,24 @@ void main()
         vec3 v0 = texelFetch(Vair_sampler, frag, 0).xyz;
         vec3 wsP = vsP*dL;
         vec3 wsPp = back_advect(wsP, v0, timestep);
-        vec3  v      = interp(Vair_sampler, wsPp).rgb;
-        float P      = interp(Pair_sampler, wsPp).x;
-        float T      = interp(Tair_sampler, wsPp).x;
-        float debris = interp(debris_sampler, wsPp).x;
+        vec3  v         = interp(Vair_sampler, wsPp).rgb;
+        float P         = interp(Pair_sampler, wsPp).x;
+        float T         = interp(Tair_sampler, wsPp).x;
+        vec3 absorption = interp(absorption_sampler, wsPp).rgb;
+        vec3 scattering = interp(scattering_sampler, wsPp).rgb;
 
         // Apply external forces
-        v += timestep * externalForces(wsP, v, P, T, L);
+        v += timestep * externalForces(wsP, time, v, P, T, L);
 
         // Apply vorticity confinement:
-        // @todo (only if vorticity confinement enabled)
-        v += timestep * vorticityConfinementForce(frag, vsPi);
+        if (vorticity_scale > 0.0)
+            v += timestep * vorticityConfinementForce(frag, vsPi);
 
-        Vair_output   = vec4(v, 0.0);
-        Pair_output   = vec4(P);
-        Tair_output   = vec4(T);
-        debris_output = vec4(debris);
+        Vair_output       = vec4(v, 0.0);
+        Pair_output       = vec4(vec3(P), 0.0);
+        Tair_output       = vec4(vec3(T), 0.0);
+        absorption_output = vec4(absorption, 0.0);
+        scattering_output = vec4(scattering, 0.0);
     }
 }
 `,
@@ -346,7 +351,8 @@ uniform float dL;
 layout(location = 0) out vec4 Vair_output;
 layout(location = 1) out vec4 Pair_output;
 layout(location = 2) out vec4 Tair_output;
-layout(location = 3) out vec4 debris_output;
+layout(location = 3) out vec4 absorption_output;
+layout(location = 4) out vec4 scattering_output;
 
 /////////////////////// user-defined code ///////////////////////
 _USER_CODE_
@@ -377,15 +383,16 @@ void main()
 
     vec3 v;
     float T;
-    vec3 E; // debris extinction
-    vec3 A; // debris albedo
+    vec3 absorption;
+    vec3 scattering;
     initial_conditions(wsP, L,
-                       v, T, E, A);
+                       v, T, absorption, scattering);
 
     Vair_output   = vec4(v, 0.0);
     Pair_output   = vec4(0.0);
     Tair_output   = vec4(T);
-    debris_output = vec4(E, 0.0);
+    absorption_output = vec4(absorption, 0.0);
+    scattering_output = vec4(scattering, 0.0);
 }
 `,
 
@@ -416,16 +423,19 @@ uniform float dL;
 
 // Physics
 uniform float time;
+uniform float timestep;
 
 /////// input buffers ///////
-uniform sampler2D Vair_sampler;      // 0, vec3 air velocity field
-uniform sampler2D Tair_sampler;      // 2, float air temperature field
-uniform sampler2D debris_sampler;    // 3, float debris density field
+uniform sampler2D Vair_sampler;       // 0, vec3 air velocity field
+uniform sampler2D Tair_sampler;       // 1, float air temperature field
+uniform sampler2D absorption_sampler; // 2, vec3 absorption field
+uniform sampler2D scattering_sampler; // 3, vec3 scattering field
 
 /////// output buffers ///////
 layout(location = 0) out vec4 Vair_output;
 layout(location = 1) out vec4 Tair_output;
-layout(location = 2) out vec4 debris_output;
+layout(location = 2) out vec4 absorption_output;
+layout(location = 3) out vec4 scattering_output;
 
 /////////////////////// user-defined code ///////////////////////
 _USER_CODE_
@@ -465,27 +475,38 @@ void main()
     {
         Vair_output   = texelFetch(Vair_sampler, frag, 0);
         Tair_output   = texelFetch(Tair_sampler, frag, 0);
-        debris_output = texelFetch(debris_sampler, frag, 0);
+        absorption_output = texelFetch(absorption_sampler, frag, 0);
+        scattering_output = texelFetch(scattering_sampler, frag, 0);
     }
     else
     {
         // Get current velocity, temperature, and debris fields:
         vec3  v = texelFetch(Vair_sampler, frag, 0).rgb;
         float T = texelFetch(Tair_sampler, frag, 0).x;
-        float E = texelFetch(debris_sampler, frag, 0).x;
+        vec3 absorption = texelFetch(absorption_sampler, frag, 0).rgb;
+        vec3 scattering = texelFetch(scattering_sampler, frag, 0).rgb;
 
         // Inject mass and modify temperature:
-        vec3 dv;
-        vec3 drho, albedo;
+        float Tinflow = 0.0;
+        vec3 vInflow          = vec3(0.0);
+        vec3 absorptionInflow = vec3(0.0);
+        vec3 scatteringInflow = vec3(0.0);
+
         inject(wsP, time, L,
-               dv, T, drho, albedo);
+               v, vInflow,
+               T, Tinflow,
+               absorption, absorptionInflow,
+               scattering, scatteringInflow);
 
-        v += dv;
-        E += drho.r; // @todo: mix injected debris extinction/albedo into current medium of voxel
+        v += vInflow * timestep;
+        T += Tinflow * timestep;
+        absorption += absorptionInflow*timestep;
+        scattering += scatteringInflow*timestep;
 
-        Vair_output   = vec4(v, 0.0);
-        Tair_output   = vec4(T);
-        debris_output = vec4(E);
+        Vair_output       = vec4(v, 0.0);
+        Tair_output       = vec4(vec3(T), 0.0);
+        absorption_output = vec4(absorption, 0.0);
+        scattering_output = vec4(scattering, 0.0);
     }
 }
 `,
@@ -890,8 +911,7 @@ uniform int Nraymarch;
 
 // Physics
 uniform float extinctionScale;
-uniform float blackbodyEmission;
-uniform float TtoKelvin;
+uniform float emissionScale;
 uniform float anisotropy;
 
 // Lighting
@@ -905,15 +925,21 @@ uniform float exposure;
 uniform float invGamma;
 
 /////// input buffers ///////
-uniform sampler2D debris_sampler; // 0, float debris density field
-uniform sampler2D Tair_sampler;   // 1, float temperature field
-uniform sampler2D Vair_sampler;   // 2, vec3 velocity field (for debug, for now)
+uniform sampler2D absorption_sampler; // 0, vec3 absorption field
+uniform sampler2D scattering_sampler; // 1, vec3 scattering field
+uniform sampler2D Tair_sampler;       // 2, float temperature field
 
 /////// output buffers ///////
 layout(location = 0) out vec4 gbuf_rad;
 
+/////////////////////// user-defined code ///////////////////////
+_USER_CODE_
+/////////////////////// user-defined code ///////////////////////
+
+
 #define M_PI 3.141592653589793
 #define sort2(a,b) { vec3 tmp=min(a,b); b=a+b-tmp; a=tmp; }
+#define DENOM_EPSILON 1.0e-7
 
 bool boundsIntersect( in vec3 rayPos, in vec3 rayDir, in vec3 bbMin, in vec3 bbMax,
                       inout float t0, inout float t1 )
@@ -938,14 +964,6 @@ float shadowHit(in vec3 rayPos, in vec3 rayDir, in vec3 bbMin, in vec3 bbMax)
     return min(min(hi.x, hi.y), hi.z);
 }
 
-/*
-bool inBounds(in vec3 pos, in vec3 bbMin, in vec3 bbMax)
-{
-    vec3 s = step(bbMin, pos) - step(bbMax, pos);
-    return bool(s.x * s.y * s.z);
-}
-*/
-
 void constructPrimaryRay(in vec2 frag,
                          inout vec3 rayPos, inout vec3 rayDir)
 {
@@ -956,34 +974,6 @@ void constructPrimaryRay(in vec2 frag,
     vec3 s = -fw*ndc.x*camX + fh*ndc.y*camY;
     rayDir = normalize(camDir + s);
     rayPos = camPos;
-}
-
-void planckianLocus(float T_kelvin, inout float xc, inout float yc)
-{
-    float thOvT = 1000.0/T_kelvin;
-    float thOvT2 = thOvT*thOvT;
-    float thOvT3 = thOvT2*thOvT;
-    if      (T_kelvin<4000.0) xc = -0.2661239*thOvT3 - 0.2343580*thOvT2 + 0.8776956*thOvT + 0.179910;
-    else                      xc = -3.0258469*thOvT3 + 2.1070379*thOvT2 + 0.2226347*thOvT + 0.240390;
-    float xc2 = xc * xc;
-    float xc3 = xc2 * xc;
-    if      (T_kelvin<2222.0) yc = -1.1063814*xc3 - 1.34811020*xc2 + 2.18555832*xc - 0.20219683;
-    else if (T_kelvin<4000.0) yc = -0.9549476*xc3 - 1.37418593*xc2 + 2.09137015*xc - 0.16748867;
-    else                      yc =  3.0817580*xc3 - 5.87338670*xc2 + 3.75112997*xc - 0.37001483;
-}
-
-vec3 tempToRGB(float T_kelvin)
-{
-    if (T_kelvin <= 1000.0) return vec3(T_kelvin/1000.0, 0.0, 0.0);
-    float x, y;
-    planckianLocus(T_kelvin, x, y);
-    float X = x/y;
-    float Y = 1.0;
-    float Z = (1.f - x - y)/y;
-    float R = max(0.0,  3.2410*X - 1.5374*Y - 0.4986*Z);
-    float G = max(0.0, -0.9682*X + 1.8760*Y + 0.0416*Z);
-    float B = max(0.0,  0.0556*X - 0.2040*Y + 1.0570*Z);
-    return vec3(R, G, B);
 }
 
 vec2 slicetoUV(int j, vec3 vsP)
@@ -1030,7 +1020,6 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     return ivec2(ui, vi);
 }
 
-
 vec3 sun_transmittance(in vec3 pos, float stepSize)
 {
     vec3 Tr = vec3(1.0); // transmittance
@@ -1045,8 +1034,9 @@ vec3 sun_transmittance(in vec3 pos, float stepSize)
         float tmid = 0.5*(tmin + tmax);
         vec3 pMarch = pos + tmid*sunDir;
         vec3 wsP = pMarch - volMin; // transform pMarch into simulation domain:
-        vec3 debrisExtinction = interp(debris_sampler, clampToBounds(wsP)).rgb;
-        vec3 sigma_t = debrisExtinction * extinctionScale;
+        vec3 absorption = interp(absorption_sampler, clampToBounds(wsP)).rgb;
+        vec3 scattering = interp(scattering_sampler, clampToBounds(wsP)).rgb;
+        vec3 sigma_t = (absorption + scattering) * extinctionScale;
         Tr *= exp(-sigma_t*dt); // transmittance over step
     }
     return Tr;
@@ -1058,7 +1048,6 @@ float phaseFunction(float mu)
     float gSqr = g*g;
     return (1.0/(4.0*M_PI)) * (1.0 - gSqr) / pow(1.0 - 2.0*g*mu + gSqr, 1.5);
 }
-
 
 void main()
 {
@@ -1090,25 +1079,23 @@ void main()
             float dt = tmax - tmin;
             float tmid = 0.5*(tmin + tmax);
             vec3 pMarch = rayPos + tmid*rayDir;
-
             vec3 wsP = pMarch - volMin; // transform pMarch into simulation domain:
 
-            // Dust extinction and albedo at step midpoints
-            vec3 debrisExtinction = interp(debris_sampler, clampToBounds(wsP)).rgb;
-            vec3 debrisAlbedo = vec3(0.5, 0.5, 0.5); // @todo: take from simulation
-            vec3 sigma_t = debrisExtinction * extinctionScale;
+            // Compute extinction and albedo at step midpoint
+            vec3 absorption = interp(absorption_sampler, clampToBounds(wsP)).rgb;
+            vec3 scattering = interp(scattering_sampler, clampToBounds(wsP)).rgb;
+            vec3 sigma_t = (absorption + scattering) * extinctionScale;
+            vec3 albedo = scattering / max(absorption, vec3(DENOM_EPSILON));
 
-            // Incident sunlight radiance at scattering point
+            // Compute in-scattered sunlight
             vec3 Li = sunPower * sunColor * sun_transmittance(pMarch, stepSize);
-
             vec3 dTr = exp(-sigma_t*dt); // transmittance over step
-            vec3 J = Li * debrisAlbedo * Tr * (vec3(1.0) - dTr); // scattering term integrated over step, assuming constant Li
+            vec3 J = Li * albedo * Tr * (vec3(1.0) - dTr); // scattering term integrated over step, assuming constant Li
             L += J * phaseFunction(dot(sunDir, rayDir));
 
             // Emit blackbody radiation from hot air
             float T = interp(Tair_sampler, clampToBounds(wsP)).r;
-            vec3 blackbody_color = tempToRGB(T * TtoKelvin);
-            vec3 emission = pow(blackbodyEmission*T, 4.0) * blackbody_color;
+            vec3 emission = emissionScale * temperatureToEmission(T);
             L += Tr * emission * dt;
 
             // Update transmittance for start of next step

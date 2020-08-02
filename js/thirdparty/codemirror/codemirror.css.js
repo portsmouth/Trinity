@@ -24,6 +24,7 @@ var codemirror_css_rules = `
 }
 
 .CodeMirror-buttonsPanel {
+    margin-left: .2em;
     margin-bottom: .5em;
     position: absolute;
     top: 50px;
@@ -31,8 +32,9 @@ var codemirror_css_rules = `
 
 .CodeMirror-buttonsPanel button {
     padding: .5em;
-    width: 8em;
-    margin-right: .5em;
+    width: 7em;
+    margin-left: .2em;
+    margin-right: .2em;
     text-align: center;
 }
 

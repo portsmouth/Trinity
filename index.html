@@ -236,9 +236,9 @@ function onLoad()
                 }
             },
             {
-                label: 'advect',
+                label: 'influence',
                 callback: function (cm) {
-                    let doc = trinity.getDoc('advect');
+                    let doc = trinity.getDoc('influence');
                     editor.swapDoc(doc);
                 }
             },
@@ -246,6 +246,13 @@ function onLoad()
                 label: 'collide',
                 callback: function (cm) {
                     let doc = trinity.getDoc('collide');
+                    editor.swapDoc(doc);
+                }
+            },
+            {
+                label: 'render',
+                callback: function (cm) {
+                    let doc = trinity.getDoc('render');
                     editor.swapDoc(doc);
                 }
             }

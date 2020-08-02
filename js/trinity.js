@@ -16,11 +16,12 @@ var Trinity = function(editor, error_editor)
     $(this.error_editor.getWrapperElement()).hide();
 
     this.editor_docs = {};
-    this.editor_docs['common']  = CodeMirror.Doc('', "x-shader/x-fragment");
-    this.editor_docs['initial'] = CodeMirror.Doc('', "x-shader/x-fragment");
-    this.editor_docs['inject']  = CodeMirror.Doc('', "x-shader/x-fragment");
-    this.editor_docs['advect']  = CodeMirror.Doc('', "x-shader/x-fragment");
-    this.editor_docs['collide'] = CodeMirror.Doc('', "x-shader/x-fragment");
+    this.editor_docs['common']    = CodeMirror.Doc('', "x-shader/x-fragment");
+    this.editor_docs['initial']   = CodeMirror.Doc('', "x-shader/x-fragment");
+    this.editor_docs['inject']    = CodeMirror.Doc('', "x-shader/x-fragment");
+    this.editor_docs['influence'] = CodeMirror.Doc('', "x-shader/x-fragment");
+    this.editor_docs['collide']   = CodeMirror.Doc('', "x-shader/x-fragment");
+    this.editor_docs['render']    = CodeMirror.Doc('', "x-shader/x-fragment");
 
     var doc = this.editor_docs['initial'];
     this.editor.swapDoc(doc);
@@ -74,6 +75,7 @@ var Trinity = function(editor, error_editor)
 
     // Instantiate renderer
     this.renderer = new Renderer();
+    let RENDERER = this.renderer;
 
     // Instantiate solver
     this.solver = new Solver();
@@ -90,7 +92,10 @@ var Trinity = function(editor, error_editor)
     let SOLVER = this.solver;
     this.editor.on("change", function(cm, n) {
         if (!TRINITY.loading)
-            SOLVER.updateShaders();
+        {
+            SOLVER.compileShaders();
+            RENDERER.compileShaders();
+        }
     });
     this.editing = false;
     this.loading = false;
@@ -113,9 +118,9 @@ var Trinity = function(editor, error_editor)
     this.resize();
 
     // Do initial shader compilation (and start solver)
-    SOLVER.updateShaders();
+    SOLVER.compileShaders();
+    RENDERER.compileShaders();
     SOLVER.restart();
-
 }
 
 /**
@@ -267,11 +272,12 @@ Trinity.prototype.get_state = function()
     };
 
     let editor_settings = {
-        common_glsl:  trinity.getGlsl('common'),
-        initial_glsl: trinity.getGlsl('initial'),
-        inject_glsl:  trinity.getGlsl('inject'),
-        advect_glsl:  trinity.getGlsl('advect'),
-        collide_glsl: trinity.getGlsl('collide')
+        common_glsl:     trinity.getGlsl('common'),
+        initial_glsl:    trinity.getGlsl('initial'),
+        inject_glsl:     trinity.getGlsl('inject'),
+        influence_glsl:  trinity.getGlsl('influence'),
+        collide_glsl:    trinity.getGlsl('collide'),
+        render_glsl:     trinity.getGlsl('render')
     };
 
     // Extract user simulation settings from GUI parameters
@@ -286,9 +292,9 @@ Trinity.prototype.get_state = function()
     let state = { RENDERER_STATE: this.renderer.settings,
                   SOLVER_STATE:   this.solver.settings,
                   SIMULATION_STATE: simulationParameters,
-                  CAMERA_STATE:   camera_settings,
-                  GUI_STATE:      gui_settings,
-                  EDITOR_STATE:   editor_settings };
+                  CAMERA_STATE:     camera_settings,
+                  GUI_STATE:        gui_settings,
+                  EDITOR_STATE:     editor_settings };
 
     return state;
 }
@@ -333,16 +339,18 @@ Trinity.prototype.load_state = function(state)
     }
 
     // Load editor state
-    if (state.EDITOR_STATE.common_glsl  === undefined) state.EDITOR_STATE.common_glsl  = '';
-    if (state.EDITOR_STATE.initial_glsl === undefined) state.EDITOR_STATE.initial_glsl = '';
-    if (state.EDITOR_STATE.inject_glsl  === undefined) state.EDITOR_STATE.inject_glsl  = '';
-    if (state.EDITOR_STATE.advect_glsl  === undefined) state.EDITOR_STATE.advect_glsl  = '';
-    if (state.EDITOR_STATE.collide_glsl === undefined) state.EDITOR_STATE.collide_glsl = '';
+    if (state.EDITOR_STATE.common_glsl     === undefined) state.EDITOR_STATE.common_glsl  = '';
+    if (state.EDITOR_STATE.initial_glsl    === undefined) state.EDITOR_STATE.initial_glsl = '';
+    if (state.EDITOR_STATE.inject_glsl     === undefined) state.EDITOR_STATE.inject_glsl  = '';
+    if (state.EDITOR_STATE.influence_glsl  === undefined) state.EDITOR_STATE.influence_glsl  = '';
+    if (state.EDITOR_STATE.collide_glsl    === undefined) state.EDITOR_STATE.collide_glsl = '';
+    if (state.EDITOR_STATE.render_glsl     === undefined) state.EDITOR_STATE.render_glsl = '';
     trinity.getDoc('common').setValue( state.EDITOR_STATE.common_glsl);
     trinity.getDoc('initial').setValue(state.EDITOR_STATE.initial_glsl);
     trinity.getDoc('inject').setValue( state.EDITOR_STATE.inject_glsl);
-    trinity.getDoc('advect').setValue( state.EDITOR_STATE.advect_glsl);
+    trinity.getDoc('influence').setValue( state.EDITOR_STATE.influence_glsl);
     trinity.getDoc('collide').setValue(state.EDITOR_STATE.collide_glsl);
+    trinity.getDoc('render').setValue(state.EDITOR_STATE.render_glsl);
 
     // Load renderer state
     this.renderer.settings = Object.assign(this.renderer.settings, state.RENDERER_STATE);
