@@ -94,8 +94,8 @@ vec4 interp(in sampler2D S, in vec3 wsP)
 
 vec3 clampToBounds(in vec3 wsP)
 {
-    vec3 halfVoxel = vec3(0.5*dL);
-    return clamp(wsP, halfVoxel, L-halfVoxel);
+    vec3 voxel = vec3(dL);
+    return clamp(wsP, voxel, L-voxel);
 }
 
 vec3 back_advect(in vec3 wsP, in vec3 vX, float h)
@@ -697,16 +697,7 @@ float toneMap(float L)
 
 void main()
 {
-    vec3 L = texture(Radiance, vTexCoord).rgb;
-    float X = L.x;
-    float Y = L.y;
-    float Z = L.z;
-    
-    // convert XYZ tristimulus to linear RGB color space
-    vec3 RGB;
-    RGB.r =  3.2406*X - 1.5372*Y - 0.4986*Z;
-    RGB.g = -0.9689*X + 1.8758*Y + 0.0415*Z;
-    RGB.b =  0.0557*X - 0.2040*Y + 1.0570*Z;
+    vec3 RGB = texture(Radiance, vTexCoord).rgb;
 
     // apply gamma correction to convert linear RGB to sRGB
     RGB = pow(RGB, vec3(invGamma));
@@ -1003,11 +994,12 @@ vec4 interp(in sampler2D S, in vec3 wsP)
     return flo*Slo + fhi*Shi;
 }
 
-vec3 clampToBounds(in vec3 wsX)
+vec3 clampToBounds(in vec3 wsP)
 {
-    vec3 halfVoxel = vec3(0.5*dL);
-    return clamp(wsX, halfVoxel, L-halfVoxel);
+    vec3 voxel = vec3(dL);
+    return clamp(wsP, voxel, L-voxel);
 }
+
 
 ivec2 mapVsToFrag(in ivec3 vsP)
 {
