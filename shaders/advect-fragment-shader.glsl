@@ -91,8 +91,8 @@ vec4 interp(in sampler2D S, in vec3 wsP)
 
 vec3 clampToBounds(in vec3 wsP)
 {
-    vec3 halfVoxel = vec3(0.5*dL);
-    return clamp(wsP, halfVoxel, L-halfVoxel);
+    vec3 voxel = vec3(dL);
+    return clamp(wsP, voxel, L-voxel);
 }
 
 vec3 back_advect(in vec3 wsP, in vec3 vX, float h)
