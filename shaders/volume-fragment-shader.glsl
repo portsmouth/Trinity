@@ -202,8 +202,9 @@ void main()
             // Compute extinction and albedo at step midpoint
             vec3 absorption = interp(absorption_sampler, clampToBounds(wsP)).rgb;
             vec3 scattering = interp(scattering_sampler, clampToBounds(wsP)).rgb;
-            vec3 sigma_t = (absorption + scattering) * extinctionScale;
-            vec3 albedo = scattering / max(absorption, vec3(DENOM_EPSILON));
+            vec3 extinction = (absorption + scattering);
+            vec3 sigma_t = extinction * extinctionScale;
+            vec3 albedo = scattering / max(extinction, vec3(DENOM_EPSILON));
 
             // Compute in-scattered sunlight
             vec3 Li = sunPower * sunColor * sun_transmittance(pMarch, stepSize);
