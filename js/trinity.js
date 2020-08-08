@@ -408,7 +408,9 @@ Trinity.prototype.show_errors = function()
 
 Trinity.prototype.hide_errors = function()
 {
-    $(this.error_editor.getWrapperElement()).hide();
+    if (this.getRenderer().compiled_successfully &&
+        this.getSolver().compiled_successfully)
+        $(this.error_editor.getWrapperElement()).hide();
 }
 
 Trinity.prototype.compile_error = function(shaderName, shaderTypeStr, error_log)
