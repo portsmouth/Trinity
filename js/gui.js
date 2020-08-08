@@ -95,6 +95,7 @@ GUI.prototype.generateSimulationSettings = function()
     // Parse code for uniform bindings:
     let SOLVER = trinity.getSolver();
     let GUI = this;
+    let CACHED_PARAMS = this.simulationFolderParametersCached;
 
     let lines = glsl.split("\n");
     lines.forEach(function(line) {
@@ -119,13 +120,21 @@ GUI.prototype.generateSimulationSettings = function()
                         if (typeof bind_object.min == 'number') min_val = bind_object.min;
                         if (typeof bind_object.max == 'number') max_val = bind_object.max;
                         if (typeof bind_object.step == 'number') step_val = bind_object.step;
-                        simulationFolder.parameters[param_name] = param_default;
+
+                        let param_value = param_default;
+                        if (CACHED_PARAMS != undefined)
+                        {
+                            if (CACHED_PARAMS.hasOwnProperty(param_name))
+                                param_value = CACHED_PARAMS[param_name];
+                        }
+                        simulationFolder.parameters[param_name] = param_value;
+
                         let syncToShader = true;
                         GUI.addSlider(simulationFolder.parameters,
                                                    {name: param_name, min: min_val, max: max_val, step: step_val},
                                                    simulationFolder,
                                                    syncToShader);
-                        SOLVER.syncFloatToShader(param_name, param_default);
+                        SOLVER.syncFloatToShader(param_name, param_value);
                     }
                     else if (Array.isArray(param_default) && param_default.length==3)
                     {
@@ -133,14 +142,22 @@ GUI.prototype.generateSimulationSettings = function()
                         let scale = 1.0;
                         if (typeof bind_object.scale == 'number')
                             scale = bind_object.scale;
-                        simulationFolder.parameters[param_name] = param_default;
+
+                        let param_value = param_default;
+                        if (CACHED_PARAMS != undefined)
+                        {
+                            if (CACHED_PARAMS.hasOwnProperty(param_name))
+                                param_value = CACHED_PARAMS[param_name];
+                        }
+                        simulationFolder.parameters[param_name] = param_value;
+
                         let syncToShader = true;
                         GUI.addColor(simulationFolder.parameters,
                                                   param_name,
                                                   scale,
-                                                  simulationFolder, 
+                                                  simulationFolder,
                                                   syncToShader);
-                        SOLVER.syncColorToShader(param_name, param_default);
+                        SOLVER.syncColorToShader(param_name, param_value);
                     }
                 }
             } catch(e) {
