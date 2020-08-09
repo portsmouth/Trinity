@@ -47,7 +47,7 @@ dat.GUI.prototype.removeFolder = function(name) {
 GUI.prototype.wipe = function()
 {
     if (this.presetsFolder    != undefined) this.gui.removeFolder(this.presetsFolder.name);
-    if (this.simulationFolder != undefined) this.gui.removeFolder(this.simulationFolder.name);
+    this.gui.removeFolder('Simulation');
     if (this.solverFolder     != undefined) this.gui.removeFolder(this.solverFolder.name);
     if (this.rendererFolder   != undefined) this.gui.removeFolder(this.rendererFolder.name);
 }
@@ -199,6 +199,7 @@ GUI.prototype.addPresetsFolder = function()
     this.presetSettings["preset"] = trinity.preset_selection;
     var presetItem = this.presetsFolder.add(this.presetSettings, 'preset', preset_names);
     presetItem.onChange(function(preset_name) { trinity.presets.load_preset(preset_name); });
+    this.presetsFolder.open();
 }
 
 GUI.prototype.createSolverSettings = function()

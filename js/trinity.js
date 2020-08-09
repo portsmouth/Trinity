@@ -378,6 +378,12 @@ Trinity.prototype.load_state = function(state)
     this.gui.refresh();
 
     this.loading = false;
+
+    // Do initial shader compilation (and start solver)
+    this.solver.compileShaders();
+    this.renderer.compileShaders();
+    this.solver.restart();
+
 }
 
 ///////////////////////////////////////////////////////////////
