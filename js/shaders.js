@@ -527,11 +527,11 @@ void main()
 precision highp float;
 
 out vec4 outputColor;
-uniform vec3 color;
+uniform vec4 color;
 
 void main() 
 {
-	outputColor = vec4(color, 1.0);
+	outputColor = color;
 }
 `,
 
@@ -685,7 +685,6 @@ in vec2 vTexCoord;
 
 uniform float exposure;
 uniform float invGamma;
-uniform float contrast;
 uniform float saturation;
 
 out vec4 g_outputColor;
@@ -725,14 +724,6 @@ void main()
     R = mean + sign(dR)*pow(abs(dR), 1.0/saturation);
     G = mean + sign(dG)*pow(abs(dG), 1.0/saturation);
     B = mean + sign(dB)*pow(abs(dB), 1.0/saturation);
-
-    // apply contrast
-    dR = R - 0.5;
-    dG = G - 0.5;
-    dB = B - 0.5;
-    R = 0.5 + sign(dR)*pow(abs(dR), 1.0/contrast);
-    G = 0.5 + sign(dG)*pow(abs(dG), 1.0/contrast);
-    B = 0.5 + sign(dB)*pow(abs(dB), 1.0/contrast);
 
     g_outputColor = vec4(vec3(R,G,B), 1.0);
 }
@@ -911,17 +902,23 @@ uniform vec3 sunColor;
 uniform float sunPower;
 uniform vec3 sunDir;
 
+// Progressive rendering
+uniform int spp;
+
 // Tonemapping
 uniform float exposure;
 uniform float invGamma;
 
 /////// input buffers ///////
-uniform sampler2D absorption_sampler; // 0, vec3 absorption field
-uniform sampler2D scattering_sampler; // 1, vec3 scattering field
-uniform sampler2D Tair_sampler;       // 2, float temperature field
+uniform sampler2D Radiance;           // 0 (last frame radiance)
+uniform sampler2D RngData;            // 1 (last frame rng seed)
+uniform sampler2D absorption_sampler; // 2, vec3 absorption field
+uniform sampler2D scattering_sampler; // 3, vec3 scattering field
+uniform sampler2D Tair_sampler;       // 4, float temperature field
 
 /////// output buffers ///////
 layout(location = 0) out vec4 gbuf_rad;
+layout(location = 1) out vec4 gbuf_rng;
 
 /////////////////////// user-defined code ///////////////////////
 _USER_CODE_
@@ -931,6 +928,22 @@ _USER_CODE_
 #define M_PI 3.141592653589793
 #define sort2(a,b) { vec3 tmp=min(a,b); b=a+b-tmp; a=tmp; }
 #define DENOM_EPSILON 1.0e-7
+
+/// GLSL floating point pseudorandom number generator, from
+/// "Implementing a Photorealistic Rendering System using GLSL", Toshiya Hachisuka
+/// http://arxiv.org/pdf/1505.06022.pdf
+float rand(inout vec4 rnd)
+{
+    const vec4 q = vec4(   1225.0,    1585.0,    2457.0,    2098.0);
+    const vec4 r = vec4(   1112.0,     367.0,      92.0,     265.0);
+    const vec4 a = vec4(   3423.0,    2646.0,    1707.0,    1999.0);
+    const vec4 m = vec4(4194287.0, 4194277.0, 4194191.0, 4194167.0);
+    vec4 beta = floor(rnd/q);
+    vec4 p = a*(rnd - beta*q) - beta*r;
+    beta = (1.0 - sign(p))*0.5*m;
+    rnd = p + beta;
+    return fract(dot(rnd/m, vec4(1.0, -1.0, 1.0, -1.0)));
+}
 
 bool boundsIntersect( in vec3 rayPos, in vec3 rayDir, in vec3 bbMin, in vec3 bbMax,
                       inout float t0, inout float t1 )
@@ -1012,18 +1025,30 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     return ivec2(ui, vi);
 }
 
-vec3 sun_transmittance(in vec3 pos, float stepSize)
+vec3 sun_transmittance(in vec3 pos, float stepSize, vec4 rnd)
 {
     vec3 Tr = vec3(1.0); // transmittance
     float t = shadowHit(pos, sunDir, volMin, volMax);
-    int numSteps = int(floor(t/(4.0*stepSize)));
+    float xi = rand(rnd);
+    int numSteps = int(ceil(t/stepSize+xi));
     for (int n=0; n<256; ++n)
     {
         if (n>=numSteps) break;
-        float tmin = float(n)*stepSize;
-        float tmax = min(tmin + stepSize, t);
-        float dt = tmax - tmin;
-        float tmid = 0.5*(tmin + tmax);
+        float dt;
+        float tmid;
+        if (numSteps==1)
+        {
+            dt = t;
+            tmid = dt*xi;
+        }
+        else
+        {
+            float tmin = (float(n) - xi)*stepSize;
+            float tmax = min(tmin + stepSize, t);
+            tmin = max(0.0, tmin);
+            dt = tmax - tmin;
+            tmid = 0.5*(tmin+tmax);
+        }
         vec3 pMarch = pos + tmid*sunDir;
         vec3 wsP = pMarch - volMin; // transform pMarch into simulation domain:
         vec3 absorption = interp(absorption_sampler, clampToBounds(wsP)).rgb;
@@ -1047,31 +1072,47 @@ void main()
     vec3 rayPos, rayDir;
     constructPrimaryRay(frag, rayPos, rayDir);
 
-    float lengthScale = length(volMax - volMin);
-    float stepSize = lengthScale / float(Nraymarch);
-
     vec3 L = vec3(0.0);
     vec3 Lbackground = skyColor;
     vec3 Tr = vec3(1.0); // transmittance along camera ray
+
+    // jitter raymarch randomly:
+    vec4 rnd = texture(RngData, vTexCoord);
+    float xi = rand(rnd);
+    float lengthScale = length(volMax - volMin);
+    float stepSize = lengthScale / float(Nraymarch);
 
     // intersect ray with volume bounds
     float t0, t1;
     if ( boundsIntersect(rayPos, rayDir, volMin, volMax, t0, t1) )
     {
         float t01 = t1 - t0;
-        int numSteps = 1 + int(floor(t01/stepSize));
+        int numSteps = int(ceil(t01/stepSize+xi));
         numSteps = min(256, numSteps);
-
         for (int n=0; n<1024; ++n)
         {
-            if (n>=numSteps)
-                break;
-            float tmin = t0 + float(n)*stepSize;
-            float tmax = min(tmin + stepSize, t1);
-            float dt = tmax - tmin;
-            float tmid = 0.5*(tmin + tmax);
+            if (n>=numSteps) break;
+
+            // Compute step bounds
+            float dt;
+            float tmid;
+            if (numSteps==1)
+            {
+                dt = t01;
+                tmid = t0 + dt*xi;
+            }
+            else
+            {
+                float tmin = t0 + (float(n) - xi)*stepSize;
+                float tmax = min(tmin + stepSize, t1);
+                tmin = max(t0, tmin);
+                dt = tmax - tmin;
+                tmid = 0.5*(tmin+tmax);
+            }
+
+            // transform pMarch into simulation domain:
             vec3 pMarch = rayPos + tmid*rayDir;
-            vec3 wsP = pMarch - volMin; // transform pMarch into simulation domain:
+            vec3 wsP = pMarch - volMin;
 
             // Compute extinction and albedo at step midpoint
             vec3 absorption = interp(absorption_sampler, clampToBounds(wsP)).rgb;
@@ -1081,12 +1122,12 @@ void main()
             vec3 albedo = scattering / max(extinction, vec3(DENOM_EPSILON));
 
             // Compute in-scattered sunlight
-            vec3 Li = sunPower * sunColor * sun_transmittance(pMarch, stepSize);
+            vec3 Li = sunPower * sunColor * sun_transmittance(pMarch, 3.0*stepSize, rnd);
             vec3 dTr = exp(-sigma_t*dt); // transmittance over step
             vec3 J = Li * albedo * Tr * (vec3(1.0) - dTr); // scattering term integrated over step, assuming constant Li
             L += J * phaseFunction(dot(sunDir, rayDir));
 
-            // Emit blackbody radiation from hot air
+            // Emit radiation from hot air
             float T = interp(Tair_sampler, clampToBounds(wsP)).r;
             vec3 emission = emissionScale * temperatureToEmission(T);
             L += Tr * emission * dt;
@@ -1096,14 +1137,18 @@ void main()
         }
     }
 
+    // Add background "sky" radiance, attenuated by volume
     L += Tr * Lbackground;
 
-    // apply gamma correction to convert linear RGB to sRGB
-    L = pow(L, vec3(invGamma));
-    L *= pow(2.0, exposure);
+    // Add latest radiance estimate to the the Monte Carlo average
+    vec4 oldL = vec4(0.0);
+    if (spp>0)
+        oldL = texture(Radiance, vTexCoord);
+    vec3 newL = (float(spp)*oldL.rgb + L) / (float(spp) + 1.0);
 
-    vec2 f = frag/resolution.xy;
-    gbuf_rad = vec4(L, 1.0);
+    // Output radiance
+    gbuf_rad = vec4(newL, 1.0);
+    gbuf_rng = rnd;
 }
 `,
 

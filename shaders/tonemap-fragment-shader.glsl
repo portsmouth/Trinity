@@ -5,7 +5,6 @@ in vec2 vTexCoord;
 
 uniform float exposure;
 uniform float invGamma;
-uniform float contrast;
 uniform float saturation;
 
 out vec4 g_outputColor;
@@ -45,14 +44,6 @@ void main()
     R = mean + sign(dR)*pow(abs(dR), 1.0/saturation);
     G = mean + sign(dG)*pow(abs(dG), 1.0/saturation);
     B = mean + sign(dB)*pow(abs(dB), 1.0/saturation);
-
-    // apply contrast
-    dR = R - 0.5;
-    dG = G - 0.5;
-    dB = B - 0.5;
-    R = 0.5 + sign(dR)*pow(abs(dR), 1.0/contrast);
-    G = 0.5 + sign(dG)*pow(abs(dG), 1.0/contrast);
-    B = 0.5 + sign(dB)*pow(abs(dB), 1.0/contrast);
 
     g_outputColor = vec4(vec3(R,G,B), 1.0);
 }

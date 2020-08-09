@@ -60,8 +60,11 @@ var Trinity = function(editor, error_editor)
     this.camControls.zoomSpeed = 2.0;
     this.camControls.flySpeed = 0.01;
     this.disable_reset = false;
-    //this.camControls.addEventListener('change', function() {
-    //                                                    });
+    this.camControls.addEventListener('change',
+        function() {
+            if (trinity.disable_reset) return;
+            trinity.render_dirty();
+        });
     this.camControls.keyPanSpeed = 100.0;
 
     this.camControls.saveState = function () {
@@ -413,6 +416,11 @@ Trinity.prototype.hide_errors = function()
         $(this.error_editor.getWrapperElement()).hide();
 }
 
+Trinity.prototype.num_lines  = function(str)
+{
+    return str.split(/\r\n|\r|\n/).length;
+}
+
 Trinity.prototype.compile_error = function(shaderName, shaderTypeStr, error_log)
 {
     this.show_errors();
@@ -420,23 +428,42 @@ Trinity.prototype.compile_error = function(shaderName, shaderTypeStr, error_log)
     this.error_editor.setValue('');
     this.error_editor.clearHistory();
 
-    errStr = '';
-    prefix = '';
-    if (shaderName != 'trace')
-        prefix = "[" + shaderName + " " + shaderTypeStr + " shader]";
+    // copied from Solver.prototype.compileShader
+    let common_glsl  = trinity.getGlsl('common') + '\n';
+    let collide_glsl = common_glsl  + trinity.getGlsl('collide')  + '\n';
+
+    let program_line_starts =
+    {
+        // (these numbers are the line numbers on which _USER_CODE_ appears)
+        'initial' : this.num_lines(common_glsl)  + 21,
+        'inject'  : this.num_lines(collide_glsl) + 30,
+        'advect'  : this.num_lines(collide_glsl) + 36,
+        'volume'  : this.num_lines(common_glsl)  + 59
+    }
+
+    program_line_start = 0;
+    if (program_line_starts.hasOwnProperty(shaderName))
+        program_line_start = program_line_starts[shaderName];
+
+    // Map internal shader names to user-facing codeMirror doc names
+    if (shaderName == 'advect') shaderName = 'influence';
+    if (shaderName == 'volume') shaderName = 'render';
+
+    let prefix = "[" + shaderName + " " + shaderTypeStr + " shader]";
+    let errStr = '';
 
     const errorRE = /\d+:(\d+):/;
     error_log.split('\n').forEach( function(error, ndx) {
         const m = errorRE.exec(error);
         if (m)
         {
-            const traceShaderLineStart = 41;
-            let lineNum = Math.max(m ? parseInt(m[1]) : 0, 0) - traceShaderLineStart;
+            let lineNum = Math.max(m ? parseInt(m[1]) : 0, 0) - program_line_start;
+            lineNum += 1; // (since lines are 1-based in codeMirror)
             error = error.replace(errorRE, "");
             error = error.replace('ERROR:', "");
             error = error.trim();
             if (error)
-                errStr += prefix + '\t→ Error on line ' + lineNum + ': ' + error + '\n';
+                errStr += prefix + ' Error on line ' + lineNum + ': ' + error + '\n';
         }
     });
 
@@ -467,26 +494,76 @@ Trinity.prototype.restartSim = function()
 }
 
 // Timestep the simulation
-Trinity.prototype.step = function()
+Trinity.prototype.runFrame = function()
 {
-    //console.warn("[Trinity] Trinity.prototype.step");
-
-    // @todo: more general update logic:
-    //   - if simulation is active, run timestep if sufficient wall-clock time has elapsed
-    //   - otherwise, just manage UI
-
     // Run a simulation timestep
-    this.solver.step();
+    if (!this.solver.paused)
+    {
+        this.solver.step();
+        this.render_dirty();
+    }
 
-    // @todo: only render if display is dirty due to:
-    //    - timestep increased
-    //    - simulation restarted since last render
-    //    - a renderer parameter changed
-
-    // Volume render simulation
+    // Volume render
     this.renderer.render(this.solver);
+
+    this.update_hud();
 }
 
+Trinity.prototype.render_dirty = function()
+{
+    this.renderer.reset();
+}
+
+Trinity.prototype.update_hud = function()
+{
+    // Update HUD text canvas
+    if (this.textCtx)
+    {
+        this.textCtx.textAlign = "left";   	// This determines the alignment of text, e.g. left, center, right
+        this.textCtx.textBaseline = "middle";	// This determines the baseline of the text, e.g. top, middle, bottom
+        this.textCtx.font = '12px monospace';	// This determines the size of the text and the font family used
+        this.textCtx.clearRect(0, 0, this.textCtx.canvas.width, this.textCtx.canvas.height);
+        this.textCtx.globalAlpha = 0.95;
+        this.textCtx.strokeStyle = 'black';
+        this.textCtx.lineWidth  = 2;
+        if (this.getGUI().visible)
+        {
+            if (this.onTrinityLink) this.textCtx.fillStyle = "#ff5500";
+            else                    this.textCtx.fillStyle = "#ffff00";
+            let ver = this.getVersion();
+            let linkWidth = this.textCtx.measureText('Trinity vX.X.X').width;
+            let trinity_version_str = 'Trinity v'+ver[0]+'.'+ver[1]+'.'+ver[2];
+            this.textCtx.strokeText(trinity_version_str, this.textCtx.canvas.width - linkWidth - 14, this.textCtx.canvas.height-20);
+            this.textCtx.fillText(  trinity_version_str, this.textCtx.canvas.width - linkWidth - 14, this.textCtx.canvas.height-20);
+            {
+                // status text
+                this.textCtx.fillStyle = "#ffaa22";
+                {
+                    let spp           = this.renderer.spp;
+                    let max_spp       = this.renderer.settings.max_spp;
+                    let timestep      = this.solver.frame;
+                    let max_timesteps = this.solver.settings.max_timesteps;
+                    let time          = Number(this.solver.time.toPrecision(3));
+                    let status_txt = '';
+                    if (!this.solver.paused)
+                        status_txt = 'timestep ' + timestep + '/' + max_timesteps + ", time " + time;
+                    else
+                        status_txt = 'timestep ' + timestep + '/' + max_timesteps + ", time " + time + ' [' + spp + '/' + max_spp + ' spp]';
+                    this.textCtx.strokeText(status_txt, 14, this.textCtx.canvas.height-25);
+                    this.textCtx.fillText(  status_txt, 14, this.textCtx.canvas.height-25);
+                }
+
+                // status text
+                this.textCtx.fillStyle = "#ccaaff";
+                {
+                    let help_txt = '[SPC to pause/play, ESC to restart]';
+                    this.textCtx.strokeText(help_txt, 14, this.textCtx.canvas.height-42);
+                    this.textCtx.fillText(  help_txt, 14, this.textCtx.canvas.height-42);
+                }
+            }
+        }
+    }
+}
 
 
 
@@ -556,12 +633,28 @@ Trinity.prototype.onDocumentMouseMove = function(event)
     if (event.clientX >= edRect.left && event.clientX <= edRect.right &&
         event.clientY >= edRect.top  && event.clientY <= edRect.bottom)
     {
-        //this.disable_reset = true;
+        this.disable_reset = true;
         this.camControls.reset();
         this.camControls.update();
-        //this.disable_reset = false;
+        this.disable_reset = false;
         this.camControls.enabled = false;
         return;
+    }
+
+    // Check whether user is trying to click the Trinity home link
+    var textCtx = this.textCtx;
+    if (textCtx)
+    {
+        var x = event.pageX;
+        var y = event.pageY;
+        let linkWidth = this.textCtx.measureText('Trinity vX.X.X').width;
+
+        let xmin = this.textCtx.canvas.width - linkWidth - 14;
+        let xmax = xmin + linkWidth;
+        let ymin = this.textCtx.canvas.height-25;
+        let ymax = this.textCtx.canvas.height-10;
+        if (x>=xmin && x<=xmax && y>=ymin && y<=ymax) this.onTrinityLink = true;
+        else this.onTrinityLink = false;
     }
 
     this.camControls.update();
@@ -580,6 +673,15 @@ Trinity.prototype.onDocumentMouseUp = function(event)
 }
 
 Trinity.prototype.onDocumentRightClick = function(event) {}
+
+Trinity.prototype.onClick = function(event)
+{
+    if (this.onTrinityLink)
+    {
+        window.open("https://github.com/portsmouth/Trinity");
+    }
+    event.preventDefault();
+}
 
 Trinity.prototype.onkeydown = function(event)
 {

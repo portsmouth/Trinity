@@ -28,8 +28,8 @@ var Solver = function()
     this.settings.Ny = 0;
     this.settings.Nz = 0;
     this.settings.max_timesteps = 100;
-    this.settings.expansion = 0.0;
- 
+    this.settings.expansion = 0.001;
+
     this.uniforms_float = {};
     this.uniforms_vec3 = {};
 
@@ -68,9 +68,9 @@ Solver.prototype.compileShaders = function()
     console.warn("[Trinity] Solver.prototype.compileShaders");
 
     let common_glsl  = trinity.getGlsl('common') + '\n';
-    let collide_glsl = common_glsl + trinity.getGlsl('collide')  + '\n';
-    let initial_glsl = common_glsl + trinity.getGlsl('initial');
-    let inject_glsl  = collide_glsl + trinity.getGlsl('inject');
+    let collide_glsl    = common_glsl  + trinity.getGlsl('collide') + '\n';
+    let initial_glsl    = common_glsl  + trinity.getGlsl('initial');
+    let inject_glsl     = collide_glsl + trinity.getGlsl('inject');
     let influence_glsl  = collide_glsl + trinity.getGlsl('influence');
 
     this.uniforms_float = {};
@@ -197,6 +197,7 @@ Solver.prototype.resize = function(Nx, Ny, Nz)
     this.time = 0.0;
 
     trinity.getRenderer().setBounds(this.domain);
+    trinity.render_dirty();
 }
 
 
@@ -248,7 +249,7 @@ Solver.prototype.step = function()
     if (this.paused)
         return;
 
-    if (this.frame == this.settings.max_timesteps)
+    if (this.frame >= this.settings.max_timesteps)
         this.restart();
 
     let gl = GLU.gl;
@@ -507,7 +508,7 @@ Solver.prototype.step = function()
         this.project_program.uniform3Fv("L",           this.domain.L);
         this.project_program.uniformF("dL",            this.domain.dL);
         this.project_program.uniformF("timestep",  this.settings.timestep);
-        this.project_program.uniformF("expansion", this.settings.expansion);
+        this.project_program.uniformF("expansion", 0.01*this.settings.expansion);
         this.syncUserUniforms(this.project_program);
 
         // Update pressure field by Jacobi iteration

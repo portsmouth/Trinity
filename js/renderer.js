@@ -9,7 +9,13 @@ var Renderer = function()
     this.settings = {};
 
     // Raymarch resolution
-    this.settings.Nraymarch = 256;
+    this.settings.Nraymarch = 100;
+    this.settings.spp_per_frame = 1;
+    this.settings.max_spp = 32;
+    this.spp = 0;
+
+    // Bounds
+    this.settings.show_bounds = true;
 
     // Lighting
     this.settings.skyColor = [0.5, 0.5, 1.0];
@@ -21,6 +27,7 @@ var Renderer = function()
     // Tonemapping
     this.settings.exposure = -1.0;
     this.settings.gamma = 2.2;
+    this.settings.saturation = 1.0;
 
     // Phase function
     this.settings.anisotropy = 0.0;
@@ -111,12 +118,7 @@ Renderer.prototype.createBoxVbo = function(origin, extents)
     return vbo;
 }
 
-Renderer.prototype.resize = function(width, height)
-{
-    this._width = width;
-    this._height = height;
-    this.quadVbo = this.createQuadVbo();
-}
+
 
 Renderer.prototype.setBounds = function(domain)
 {
@@ -151,16 +153,17 @@ Renderer.prototype.compileShaders = function()
 
 Renderer.prototype.render = function(solver)
 {
-    // @todo:  render only on dirty
     if (!this.compiled_successfully)
         return;
 
-	let gl = GLU.gl;
+    if (this.spp >= this.settings.max_spp)
+        return;
+
+    let gl = GLU.gl;
 
     gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
     gl.viewport(0.0, 0.0, this._width, this._height);
-	gl.clearColor(0.0, 0.0, 0.0, 1.0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
 	var camera = trinity.getCamera();
     var camPos = camera.position.clone();
@@ -175,14 +178,16 @@ Renderer.prototype.render = function(solver)
     let absorption = solver.getAbsorption(); // (the absorption texture)
     let scattering = solver.getScattering(); // (the scattering texture)
 
+    let LAST_WRITE_BUFF = 0;
+
     // Volume render
     {
         this.volumeProgram.bind();
 
         // Bind textures for air temperature and medium absorption/scattering
-        absorption.bind(0);
-        scattering.bind(1);
-        Tair.bind(2);
+        absorption.bind(2);
+        scattering.bind(3);
+        Tair.bind(4);
         this.volumeProgram.uniformTexture("absorption_sampler", absorption);
         this.volumeProgram.uniformTexture("scattering_sampler", scattering);
         this.volumeProgram.uniformTexture("Tair_sampler", Tair);
@@ -218,10 +223,6 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniformF("extinctionScale", Math.pow(10.0, this.settings.extinctionScale));
         this.volumeProgram.uniformF("emissionScale", Math.pow(10.0, this.settings.emissionScale));
 
-        // Tonemapping
-        this.volumeProgram.uniformF("exposure", this.settings.exposure);
-        this.volumeProgram.uniformF("invGamma", 1.0/this.settings.gamma);
-
         let latTheta = (90.0-this.settings.sunLatitude) * Math.PI/180.0;
         let lonPhi = this.settings.sunLongitude * Math.PI/180.0;
         let costheta = Math.cos(latTheta);
@@ -238,12 +239,54 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniformF("sunPower", Math.pow(10.0, this.settings.sunPower));
         this.volumeProgram.uniform3Fv("sunDir", sunDir);
 
+        // Render into progressive radiance buffer spp_per_frames times:
+        for (let n=0; n<this.settings.spp_per_frame; ++n)
+        {
+            this.fbo.bind();
+            this.fbo.drawBuffers(2);
+            let READ_BUFF  = this.spp % 2;
+            let WRITE_BUFF = 1 - READ_BUFF;
+            LAST_WRITE_BUFF = WRITE_BUFF;
+            this.progressiveStates[READ_BUFF].bind(this.volumeProgram);
+            this.progressiveStates[WRITE_BUFF].attach(this.fbo);
+            this.volumeProgram.uniformI("spp", this.spp);
+            this.quadVbo.bind();
+            this.quadVbo.draw(this.volumeProgram, gl.TRIANGLE_FAN);
+            this.spp++;
+        }
+
+        if (this.spp > this.settings.max_spp)
+            this.spp = this.settings.max_spp;
+
+        this.fbo.unbind();
+        gl.bindTexture(gl.TEXTURE_2D, null);
+    }
+
+    // Tonemapping / compositing
+    {
+        this.tonemapProgram.bind();
+        let radianceTexCurrent = this.progressiveStates[LAST_WRITE_BUFF].radianceTex;
+        radianceTexCurrent.bind(0);
+        this.tonemapProgram.uniformTexture("Radiance", radianceTexCurrent);
+        this.tonemapProgram.uniformF("exposure", this.settings.exposure);
+        this.tonemapProgram.uniformF("invGamma", 1.0/this.settings.gamma);
+        this.tonemapProgram.uniformF("saturation", this.settings.saturation);
+
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.blendEquation(gl.FUNC_ADD);
         this.quadVbo.bind();
-        this.quadVbo.draw(this.volumeProgram, gl.TRIANGLE_FAN);
+        this.quadVbo.draw(this.tonemapProgram, gl.TRIANGLE_FAN);
+        gl.disable(gl.BLEND);
     }
 
     // draw simulation bounds
+    if (this.settings.show_bounds)
     {
+        gl.enable(gl.BLEND);
+        gl.disable(gl.DEPTH_TEST);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
         this.lineProgram.bind();
 
         // Setup projection matrix
@@ -251,7 +294,7 @@ Renderer.prototype.render = function(solver)
         var projectionMatrixLocation = this.lineProgram.getUniformLocation("u_projectionMatrix");
         gl.uniformMatrix4fv(projectionMatrixLocation, false, projectionMatrix);
 
-        this.lineProgram.uniform3Fv("color", [0.5, 0.0, 0.0]);
+        this.lineProgram.uniform4Fv("color", [0.5, 0.5, 0.6, 0.15]);
 
         // Setup modelview matrix (to match camera)
         camera.updateMatrixWorld();
@@ -263,12 +306,96 @@ Renderer.prototype.render = function(solver)
 
         this.boxVbo.bind();
         this.boxVbo.draw(this.lineProgram, gl.LINES);
+        gl.disable(gl.BLEND);
     }
 
     gl.finish();
 }
 
 
+
+Renderer.prototype.resize = function(width, height)
+{
+    this._width = width;
+    this._height = height;
+
+    if (this.fbo != undefined)
+    this.fbo.unbind();
+    this.fbo = new GLU.RenderTarget();
+
+    // Progressive rendering radiance/rng states, for read/write ping-pong
+    this.progressiveStates = [new ProgressiveState(this._width, this._height),
+                              new ProgressiveState(this._width, this._height)];
+
+    this.quadVbo = this.createQuadVbo();
+    this.reset();
+}
+
+
+Renderer.prototype.reset = function()
+{
+    this.spp = 0;
+}
+
+
+//////////////////////////////////////////////////
+// ProgressiveState
+//////////////////////////////////////////////////
+
+var ProgressiveState = function(width, height)
+{
+    var radianceData = new Float32Array(width*height*4); // Path radiance, and sample count
+    var rngData      = new Float32Array(width*height*4); // Random number seed
+    for (var i=0; i<width*height; ++i)
+    {
+        rngData[i*4 + 0] = Math.random()*4194167.0;
+        rngData[i*4 + 1] = Math.random()*4194167.0;
+        rngData[i*4 + 2] = Math.random()*4194167.0;
+        rngData[i*4 + 3] = Math.random()*4194167.0;
+    }
+    this.radianceTex = new GLU.Texture(width, height, 4, true, false, true, radianceData);
+    this.rngTex      = new GLU.Texture(width, height, 4, true, false, true, rngData);
+}
+
+ProgressiveState.prototype.bind = function(shader)
+{
+    this.radianceTex.bind(0);
+    this.rngTex.bind(1);
+    shader.uniformTexture("Radiance", this.radianceTex);
+    shader.uniformTexture("RngData", this.rngTex);
+}
+
+ProgressiveState.prototype.attach = function(fbo)
+{
+    var gl = GLU.gl;
+    fbo.attachTexture(this.radianceTex, 0);
+    fbo.attachTexture(this.rngTex, 1);
+    /*
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE)
+    {
+        GLU.fail("Invalid framebuffer");
+    }
+    */
+}
+
+ProgressiveState.prototype.detach = function(fbo)
+{
+    var gl = GLU.gl;
+    fbo.detachTexture(0);
+    fbo.detachTexture(1);
+}
+
+ProgressiveState.prototype.clear = function(fbo)
+{
+    // clear radiance buffer
+    var gl = GLU.gl;
+    fbo.bind();
+    fbo.drawBuffers(1);
+    fbo.attachTexture(this.radianceTex, 0);
+    gl.clearColor(0.0, 0.0, 0.0, 0.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    fbo.unbind();
+}
 
 
 

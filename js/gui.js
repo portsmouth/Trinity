@@ -105,8 +105,8 @@ GUI.prototype.generateSimulationSettings = function()
             // find beginning of comment
             let bind_statement = line.substr(line.indexOf('//')+2);
             try {
-                let bind_object = JSON.parse(bind_statement);
-                let param_name    = bind_object.label;
+                let bind_object   = JSON.parse(bind_statement);
+                let param_name    = bind_object.name;
                 let param_default = bind_object.default;
                 if ((param_name    !== undefined) &&
                     (param_default !== undefined))
@@ -171,6 +171,8 @@ GUI.prototype.generateSimulationSettings = function()
     {
         for (const param_name of Object.keys(this.simulationFolderParametersCached))
         {
+            if (!simulationFolder.parameters.hasOwnProperty(param_name))
+                continue;
             let param_value = this.simulationFolderParametersCached[param_name];
             simulationFolder.parameters[param_name] = param_value;
             if (typeof param_value == 'number')
@@ -201,7 +203,8 @@ GUI.prototype.addPresetsFolder = function()
 
 GUI.prototype.createSolverSettings = function()
 {
-    var solver = trinity.getSolver();
+    let solver = trinity.getSolver();
+    let renderer = trinity.getRenderer();
 
     this.solverFolder = this.gui.addFolder('Solver');
 
@@ -212,11 +215,11 @@ GUI.prototype.createSolverSettings = function()
     this.solverFolder.add(this.solverFolder, 'Nx', 32, 1024).onChange(             function(Nx) { solver.resize(Math.floor(Nx), solver.settings.Ny, solver.settings.Nz); } );
     this.solverFolder.add(this.solverFolder, 'Ny', 32, 1024).onChange(             function(Ny) { solver.resize(solver.settings.Nx, Math.floor(Ny), solver.settings.Nz); } );
     this.solverFolder.add(this.solverFolder, 'Nz', 32, 1024).onChange(             function(Nz) { solver.resize(solver.settings.Nx, solver.settings.Ny, Math.floor(Nz)); } );
-    this.solverFolder.add(solver.settings, 'NprojSteps', 1, 256).onChange(         function(NprojSteps) { solver.settings.NprojSteps = Math.floor(NprojSteps); } );
-    this.solverFolder.add(solver.settings, 'timestep', 0.0, 10.0).onChange(        function() { } );
-    this.solverFolder.add(solver.settings, 'max_timesteps', 0.0, 3000.0).onChange( function(max_timesteps) { solver.settings.maxTimeSteps = Math.floor(max_timesteps); } );
-    this.solverFolder.add(solver.settings, 'vorticity_scale', 0.0, 0.99).onChange( function() { } );
-    this.solverFolder.add(solver.settings, 'expansion', 0.0, 0.01).onChange(       function() { } );
+    this.solverFolder.add(solver.settings, 'NprojSteps', 1, 256).onChange(         function(NprojSteps) { solver.settings.NprojSteps = Math.floor(NprojSteps); trinity.render_dirty(); } );
+    this.solverFolder.add(solver.settings, 'timestep', 0.0, 10.0).onChange(        function() { trinity.render_dirty(); } );
+    this.solverFolder.add(solver.settings, 'max_timesteps', 0.0, 3000.0).onChange( function(max_timesteps) { solver.settings.max_timesteps = Math.floor(max_timesteps); trinity.render_dirty(); } );
+    this.solverFolder.add(solver.settings, 'vorticity_scale', 0.0, 0.99).onChange( function() { trinity.render_dirty(); } );
+    this.solverFolder.add(solver.settings, 'expansion', 0.0, 1.0).onChange(        function() { trinity.render_dirty(); } );
 
     this.solverFolder.open();
 }
@@ -227,15 +230,15 @@ GUI.prototype.createRendererSettings = function()
     var renderer = trinity.getRenderer();
     var camera = trinity.getCamera();
 
-    this.rendererFolder.add(renderer.settings, 'Nraymarch', 32, 1024);
-    this.rendererFolder.add(renderer.settings, 'extinctionScale', -6.0, 6.0);
-    this.rendererFolder.add(renderer.settings, 'emissionScale', -10.0, 10.0);
-    this.rendererFolder.add(renderer.settings, 'anisotropy', -1.0, 1.0);
-    this.rendererFolder.add(renderer.settings, 'exposure', -10.0, 10.0);
-    this.rendererFolder.add(renderer.settings, 'gamma', 1.0, 3.0);
-    this.rendererFolder.add(renderer.settings, 'sunLatitude', -90.0, 90.0).onChange(  function() { } );
-    this.rendererFolder.add(renderer.settings, 'sunLongitude', 0.0, 360.0).onChange(  function() { } );
-    this.rendererFolder.add(renderer.settings, 'sunPower', -3.0, 3.0).onChange(       function() { } );
+    this.rendererFolder.add(renderer.settings, 'extinctionScale', -6.0, 6.0).onChange(function() { trinity.render_dirty(); });
+    this.rendererFolder.add(renderer.settings, 'emissionScale', -10.0, 10.0).onChange(function() { trinity.render_dirty(); });
+    this.rendererFolder.add(renderer.settings, 'anisotropy', -1.0, 1.0).onChange(     function() { trinity.render_dirty(); });
+    this.rendererFolder.add(renderer.settings, 'exposure', -10.0, 10.0).onChange(     function() { trinity.render_dirty(); });
+    this.rendererFolder.add(renderer.settings, 'gamma', 0.0, 3.0).onChange(           function() { trinity.render_dirty(); });
+    this.rendererFolder.add(renderer.settings, 'saturation', 0.0, 3.0).onChange(      function() { trinity.render_dirty(); });
+    this.rendererFolder.add(renderer.settings, 'sunLatitude', -90.0, 90.0).onChange(  function() { trinity.render_dirty(); });
+    this.rendererFolder.add(renderer.settings, 'sunLongitude', 0.0, 360.0).onChange(  function() { trinity.render_dirty(); });
+    this.rendererFolder.add(renderer.settings, 'sunPower', -3.0, 3.0).onChange(       function() { trinity.render_dirty(); });
 
     this.rendererFolder.sunColor = [renderer.settings.sunColor[0]*255.0,
                                     renderer.settings.sunColor[1]*255.0,
@@ -255,6 +258,7 @@ GUI.prototype.createRendererSettings = function()
                                 renderer.settings.sunColor[1] = C[1] / 255.0;
                                 renderer.settings.sunColor[2] = C[2] / 255.0;
                             }
+                            trinity.render_dirty();
                         } );
 
     this.rendererFolder.skyColor = [renderer.settings.skyColor[0]*255.0,
@@ -275,50 +279,70 @@ GUI.prototype.createRendererSettings = function()
                                 renderer.settings.skyColor[1] = C[1] / 255.0;
                                 renderer.settings.skyColor[2] = C[2] / 255.0;
                             }
+                            trinity.render_dirty();
                         } );
 
-	this.rendererFolder.close();
+    this.rendererFolder.add(renderer.settings, 'Nraymarch', 8, 1024).onChange(       function(Nraymarch)     { renderer.settings.Nraymarch     = Math.floor(Nraymarch);     trinity.render_dirty(); });
+    this.rendererFolder.add(renderer.settings, 'max_spp', 1, 256).onChange(           function(max_spp)       { renderer.settings.max_spp       = Math.floor(max_spp);       trinity.render_dirty(); });
+    this.rendererFolder.add(renderer.settings, 'spp_per_frame', 1, 8).onChange(       function(spp_per_frame) { renderer.settings.spp_per_frame = Math.floor(spp_per_frame); trinity.render_dirty(); });
+    this.rendererFolder.add(renderer.settings, 'show_bounds').onChange(               function() { trinity.render_dirty(); });
+
+    this.rendererFolder.close();
 }
 
 GUI.prototype.addSlider = function(parameters, param, folder=undefined, syncToShader=false)
 {
-	let _f = this.userFolder;
-	if (typeof folder !== 'undefined') _f = folder;
-	var name = param.name;
-	var min  = param.min;
-	var max  = param.max;
-	var step = param.step;
-	var item;
-	if (step==null || step==undefined) { item = _f.add(parameters, name, min, max, step); }
-	else                               { item = _f.add(parameters, name, min, max);       }
-	item.onChange( function(value) { trinity.camera.enabled = false; } );
-	item.onFinishChange( function(value) { if (syncToShader) trinity.getSolver().syncFloatToShader(name, value); trinity.camera.enabled = true; } );
-	return item;
+    let _f = this.userFolder;
+    if (typeof folder !== 'undefined') _f = folder;
+    var name = param.name;
+    var min  = param.min;
+    var max  = param.max;
+    var step = param.step;
+    var item;
+    if (step==null || step==undefined) { item = _f.add(parameters, name, min, max, step); }
+    else                               { item = _f.add(parameters, name, min, max);       }
+    item.onChange( function(value) {
+        trinity.camera.enabled = false;
+        if (syncToShader) trinity.getSolver().syncFloatToShader(name, value);
+        trinity.render_dirty();
+    }
+    );
+    item.onFinishChange( function(value) {
+        if (syncToShader) trinity.getSolver().syncFloatToShader(name, value);
+        trinity.render_dirty();
+        trinity.camera.enabled = true; } );
+    return item;
 }
 
 GUI.prototype.addColor = function(parameters, name, scale=1.0, folder=undefined, syncToShader=false)
 {
-	let _f = this.userFolder;
-	if (typeof folder !== 'undefined') _f = folder;
-	_f[name] = [parameters[name][0]*255.0, parameters[name][1]*255.0, parameters[name][2]*255.0];
-	var item = _f.addColor(_f, name);
-	item.onChange( function(color) {
-								if (typeof color==='string' || color instanceof String)
-								{
-									var C = hexToRgb(color);
-									parameters[name][0] = scale * C.r / 255.0;
-									parameters[name][1] = scale * C.g / 255.0;
-									parameters[name][2] = scale * C.b / 255.0;
-								}
-								else
-								{
-									parameters[name][0] = scale * color[0] / 255.0;
-									parameters[name][1] = scale * color[1] / 255.0;
-									parameters[name][2] = scale * color[2] / 255.0;
-								}
-								if (syncToShader) trinity.getSolver().syncColorToShader(name, parameters[name]);
-							} );
-	return item;
+    let _f = this.userFolder;
+    if (typeof folder !== 'undefined') _f = folder;
+    _f[name] = [parameters[name][0]*255.0, parameters[name][1]*255.0, parameters[name][2]*255.0];
+    var item = _f.addColor(_f, name);
+    item.onChange( function(color) {
+                                if (typeof color==='string' || color instanceof String)
+                                {
+                                    var C = hexToRgb(color);
+                                    parameters[name][0] = scale * C.r / 255.0;
+                                    parameters[name][1] = scale * C.g / 255.0;
+                                    parameters[name][2] = scale * C.b / 255.0;
+                                }
+                                else
+                                {
+                                    parameters[name][0] = scale * color[0] / 255.0;
+                                    parameters[name][1] = scale * color[1] / 255.0;
+                                    parameters[name][2] = scale * color[2] / 255.0;
+                                }
+                                if (syncToShader) trinity.getSolver().syncColorToShader(name, parameters[name]);
+                                trinity.render_dirty();
+                            } );
+    item.onFinishChange( function(value) {
+        if (syncToShader) trinity.getSolver().syncColorToShader(name, parameters[name]);
+        trinity.render_dirty();
+        trinity.render_dirty();
+    });
+    return item;
 }
 
 
