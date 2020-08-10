@@ -7,7 +7,7 @@ var codemirror_css_rules = `
   /* Set height, width, borders, and global font properties here */
   font-family: monospace;
   font-size: 12px;
-  height: 400px;
+  height: auto;
   width: 600px;
   top: 90px;
   color: black;
