@@ -419,7 +419,9 @@ Trinity.prototype.hide_errors = function()
 {
     if (this.getRenderer().compiled_successfully &&
         this.getSolver().compiled_successfully)
+    {
         $(this.error_editor.getWrapperElement()).hide();
+    }
 }
 
 Trinity.prototype.num_lines  = function(str)
