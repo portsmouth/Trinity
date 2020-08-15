@@ -464,6 +464,7 @@ Solver.prototype.step = function()
         this.update_program.uniform3Fv("L",           this.domain.L);
         this.update_program.uniformF("dL",            this.domain.dL);
         this.update_program.uniformF("timestep", this.timestep);
+        this.syncUserUniforms(this.update_program);
 
         this.fbo.bind();
         this.fbo.drawBuffers(1);
