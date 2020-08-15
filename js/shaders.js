@@ -138,7 +138,7 @@ bool isSolidCell(in ivec3 vsPi)
 {
     vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
     vec3 wsP = vsP*dL;
-    return isSolid(wsP, L);
+    return collisionSDF(wsP, L) < 0.0;
 }
 
 void main()
@@ -281,7 +281,7 @@ bool isSolidCell(in ivec3 vsPi)
 {
     vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
     vec3 wsP = vsP*dL;
-    return isSolid(wsP, L);
+    return collisionSDF(wsP, L) < 0.0;
 }
 
 void main()
@@ -445,7 +445,7 @@ bool isSolidCell(in ivec3 vsPi)
 {
     vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
     vec3 wsP = vsP*dL;
-    return isSolid(wsP, L);
+    return collisionSDF(wsP, L) < 0.0;
 }
 
 vec3 mapFragToVs(in ivec2 frag)
@@ -606,7 +606,7 @@ bool isSolidCell(in ivec3 vsPi)
 {
     vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
     vec3 wsP = vsP*dL;
-    return isSolid(wsP, L);
+    return collisionSDF(wsP, L) < 0.0;
 }
 
 void main()
@@ -799,7 +799,7 @@ bool isSolidCell(in ivec3 vsPi)
 {
     vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
     vec3 wsP = vsP*dL;
-    return isSolid(wsP, L);
+    return collisionSDF(wsP, L) < 0.0;
 }
 
 void main()
