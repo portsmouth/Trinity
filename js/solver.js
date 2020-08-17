@@ -391,6 +391,7 @@ Solver.prototype.step = function()
         this.div_program.uniformI("Ncol",          this.domain.Ncol);
         this.div_program.uniform3Fv("L",           this.domain.L);
         this.div_program.uniformF("dL",            this.domain.dL);
+        this.div_program.uniformF("time",          this.time);
         this.syncUserUniforms(this.div_program);
         this.fbo.bind();
         this.fbo.drawBuffers(1);
@@ -413,6 +414,7 @@ Solver.prototype.step = function()
         this.project_program.uniformI("Ncol",          this.domain.Ncol);
         this.project_program.uniform3Fv("L",           this.domain.L);
         this.project_program.uniformF("dL",            this.domain.dL);
+        this.project_program.uniformF("time",          this.time);
         this.project_program.uniformF("timestep",  this.settings.timestep);
         this.project_program.uniformF("expansion", 0.01*this.settings.expansion);
         this.syncUserUniforms(this.project_program);

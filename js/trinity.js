@@ -446,7 +446,7 @@ Trinity.prototype.compile_error = function(shaderName, shaderTypeStr, error_log)
         'initial' : this.num_lines(common_glsl)  + 21,
         'inject'  : this.num_lines(collide_glsl) + 30,
         'advect'  : this.num_lines(collide_glsl) + 36,
-        'volume'  : this.num_lines(common_glsl)  + 59
+        'volume'  : this.num_lines(collide_glsl) + 59
     }
 
     program_line_start = 0;

@@ -23,6 +23,9 @@ var Renderer = function()
     this.settings.sunPower = 1.0;
     this.settings.sunLatitude   = 60.0;
     this.settings.sunLongitude  = 0.0;
+    this.settings.colliderSpec = [0.5, 0.5, 0.5];
+    this.settings.colliderDiffuse = [0.8, 0.2, 0.2];
+    this.settings.colliderRoughness = 0.2;
 
     // Tonemapping
     this.settings.exposure = -1.0;
@@ -133,7 +136,8 @@ Renderer.prototype.compileShaders = function()
     console.warn("[Trinity] Renderer.prototype.compileShaders");
 
     let common_glsl  = trinity.getGlsl('common') + '\n';
-    let render_glsl = common_glsl + trinity.getGlsl('render');
+    let collide_glsl = common_glsl  + trinity.getGlsl('collide')  + '\n';
+    let render_glsl = collide_glsl + trinity.getGlsl('render');
 
     trinity.show_errors();
     this.compiled_successfully = false;
@@ -219,6 +223,7 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniformI("Nraymarch", this.settings.Nraymarch);
 
         // Physics
+        this.volumeProgram.uniformF("time",           solver.time);
         this.volumeProgram.uniformF("anisotropy", this.settings.anisotropy);
         this.volumeProgram.uniformF("extinctionScale", Math.pow(10.0, this.settings.extinctionScale));
         this.volumeProgram.uniformF("emissionScale", Math.pow(10.0, this.settings.emissionScale));
@@ -238,6 +243,10 @@ Renderer.prototype.render = function(solver)
         this.volumeProgram.uniform3Fv("sunColor", this.settings.sunColor);
         this.volumeProgram.uniformF("sunPower", Math.pow(10.0, this.settings.sunPower));
         this.volumeProgram.uniform3Fv("sunDir", sunDir);
+
+        this.volumeProgram.uniform3Fv("colliderDiffuse", this.settings.colliderDiffuse);
+        this.volumeProgram.uniform3Fv("colliderSpec", this.settings.colliderSpec);
+        this.volumeProgram.uniformF("colliderRoughness", this.settings.colliderRoughness);
 
         // Render into progressive radiance buffer spp_per_frames times:
         for (let n=0; n<this.settings.spp_per_frame; ++n)

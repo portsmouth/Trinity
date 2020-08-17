@@ -27,6 +27,7 @@ uniform float dL;
 uniform int Nraymarch;
 
 // Physics
+uniform float time;
 uniform float extinctionScale;
 uniform float emissionScale;
 uniform float anisotropy;
@@ -36,6 +37,9 @@ uniform vec3 skyColor;
 uniform vec3 sunColor;
 uniform float sunPower;
 uniform vec3 sunDir;
+uniform vec3 colliderDiffuse;
+uniform vec3 colliderSpec;
+uniform float colliderRoughness;
 
 // Progressive rendering
 uniform int spp;
@@ -160,10 +164,10 @@ ivec2 mapVsToFrag(in ivec3 vsP)
     return ivec2(ui, vi);
 }
 
-vec3 sun_transmittance(in vec3 pos, float stepSize, vec4 rnd)
+vec3 sun_transmittance(in vec3 pW, float stepSize, vec4 rnd)
 {
     vec3 Tr = vec3(1.0); // transmittance
-    float t = shadowHit(pos, sunDir, volMin, volMax);
+    float t = shadowHit(pW, sunDir, volMin, volMax);
     float xi = rand(rnd);
     int numSteps = int(ceil(t/stepSize+xi));
     for (int n=0; n<256; ++n)
@@ -184,7 +188,7 @@ vec3 sun_transmittance(in vec3 pos, float stepSize, vec4 rnd)
             dt = tmax - tmin;
             tmid = 0.5*(tmin+tmax);
         }
-        vec3 pMarch = pos + tmid*sunDir;
+        vec3 pMarch = pW + tmid*sunDir;
         vec3 wsP = pMarch - volMin; // transform pMarch into simulation domain:
         vec3 absorption = interp(absorption_sampler, clampToBounds(wsP)).rgb;
         vec3 scattering = interp(scattering_sampler, clampToBounds(wsP)).rgb;
@@ -199,6 +203,68 @@ float phaseFunction(float mu)
     float g = anisotropy;
     float gSqr = g*g;
     return (1.0/(4.0*M_PI)) * (1.0 - gSqr) / pow(1.0 - 2.0*g*mu + gSqr, 1.5);
+}
+
+float _sdBox(vec3 pW, vec3 bmin, vec3 bmax)
+{
+    vec3 d = abs(pW-0.5*(bmin+bmax)) - 0.5*(bmax-bmin);
+    return min(max(d.x,max(d.y,d.z)),0.0) + length(max(d,0.0));
+}
+
+float _collisionSDF(vec3 wsP)
+{
+    float s = _sdBox(wsP, volMin, volMax);
+    return max(s, collisionSDF(wsP, L));
+}
+
+bool traceSDF(in vec3 start, in vec3 dir, float tend, float lengthScale, inout float t)
+{
+    float minMarch = 1.0e-3 * lengthScale;
+    const float HUGE_VAL = 1.0e20;
+    vec3 pW = start;
+    vec3 wsP = pW - volMin;
+    float sdf = _collisionSDF(wsP);
+    float InitialSign = sign(sdf);
+    t = InitialSign * sdf;
+    if (t>=tend) return false;
+    for (int n=0; n<256; n++)
+    {
+        vec3 pW = start + t*dir;
+        wsP = pW - volMin;
+        sdf = abs(_collisionSDF(wsP));
+        if (sdf<minMarch)
+            return true;
+        t += InitialSign * sdf;
+        if (t>=tend) return false;
+    }
+    return false;
+}
+
+vec3 normalSDF(in vec3 pW, float lengthScale)
+{
+    // Compute normal as gradient of SDF
+    float normalEpsilon = 2.0e-3 * lengthScale;
+    vec3 e = vec3(normalEpsilon, 0.0, 0.0);
+    vec3 Xp = pW+e.xyy; vec3 Xn = pW-e.xyy;
+    vec3 Yp = pW+e.yxy; vec3 Yn = pW-e.yxy;
+    vec3 Zp = pW+e.yyx; vec3 Zn = pW-e.yyx;
+    vec3 N;
+    N = vec3(   _collisionSDF(Xp) - _collisionSDF(Xn),
+                _collisionSDF(Yp) - _collisionSDF(Yn),
+                _collisionSDF(Zp) - _collisionSDF(Zn));
+    return normalize(N);
+}
+
+
+vec3 colliderRadiance(in vec3 pW, in vec3 rayDir, float lengthScale, float stepSize, inout vec4 rnd)
+{
+    vec3 Li = sunPower * sunColor * sun_transmittance(pW, 3.0*stepSize, rnd); // sun radiance
+    vec3 N = normalSDF(pW, lengthScale); // local SDF normal
+    vec3 L = sunDir;
+    vec3 R = -reflect(L, N);
+    vec3 V = -rayDir;
+    vec3 phong = colliderDiffuse*max(0.0, dot(L, N)) + colliderSpec*pow(max(0.0, dot(R, V)), 1.0/colliderRoughness);
+    return Li * phong;
 }
 
 void main()
@@ -221,7 +287,20 @@ void main()
     float t0, t1;
     if ( boundsIntersect(rayPos, rayDir, volMin, volMax, t0, t1) )
     {
+        t0 = max(0.0, t0);
         float t01 = t1 - t0;
+
+        // Check for hit with collision object
+        vec3 trace_start = rayPos + t0*rayDir;
+        float t_trace;
+        if (traceSDF(trace_start, rayDir, t01, lengthScale, t_trace))
+        {
+            vec3 hit = trace_start + t_trace*rayDir;
+            Lbackground = colliderRadiance(hit, rayDir, lengthScale, stepSize, rnd);
+            t1 = t0 + t_trace;
+            t01 = t1 - t0;
+        }
+
         int numSteps = int(ceil(t01/stepSize+xi));
         numSteps = min(256, numSteps);
         for (int n=0; n<1024; ++n)

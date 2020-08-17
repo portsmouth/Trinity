@@ -288,6 +288,51 @@ GUI.prototype.createRendererSettings = function()
     this.rendererFolder.add(renderer.settings, 'spp_per_frame', 1, 8).onChange(       function(spp_per_frame) { renderer.settings.spp_per_frame = Math.floor(spp_per_frame); trinity.render_dirty(); });
     this.rendererFolder.add(renderer.settings, 'show_bounds').onChange(               function() { trinity.render_dirty(); });
 
+    this.rendererFolder.colliderDiffuse = [renderer.settings.colliderDiffuse[0]*255.0,
+                                           renderer.settings.colliderDiffuse[1]*255.0,
+                                           renderer.settings.colliderDiffuse[2]*255.0];
+    let colliderDiffuseItem = this.rendererFolder.addColor(this.rendererFolder, 'colliderDiffuse');
+    colliderDiffuseItem.onChange( function(C) {
+                            if (typeof C==='string' || C instanceof String)
+                            {
+                                var color = hexToRgb(C);
+                                renderer.settings.colliderDiffuse[0] = color.r / 255.0;
+                                renderer.settings.colliderDiffuse[1] = color.g / 255.0;
+                                renderer.settings.colliderDiffuse[2] = color.b / 255.0;
+                            }
+                            else
+                            {
+                                renderer.settings.colliderDiffuse[0] = C[0] / 255.0;
+                                renderer.settings.colliderDiffuse[1] = C[1] / 255.0;
+                                renderer.settings.colliderDiffuse[2] = C[2] / 255.0;
+                            }
+                            trinity.render_dirty();
+                        } );
+
+
+    this.rendererFolder.colliderSpec = [renderer.settings.colliderSpec[0]*255.0,
+                                        renderer.settings.colliderSpec[1]*255.0,
+                                        renderer.settings.colliderSpec[2]*255.0];
+    let colliderSpecItem = this.rendererFolder.addColor(this.rendererFolder, 'colliderSpec');
+    colliderSpecItem.onChange( function(C) {
+                        if (typeof C==='string' || C instanceof String)
+                        {
+                            var color = hexToRgb(C);
+                            renderer.settings.colliderSpec[0] = color.r / 255.0;
+                            renderer.settings.colliderSpec[1] = color.g / 255.0;
+                            renderer.settings.colliderSpec[2] = color.b / 255.0;
+                        }
+                        else
+                        {
+                            renderer.settings.colliderSpec[0] = C[0] / 255.0;
+                            renderer.settings.colliderSpec[1] = C[1] / 255.0;
+                            renderer.settings.colliderSpec[2] = C[2] / 255.0;
+                        }
+                        trinity.render_dirty();
+                    } );
+
+    this.rendererFolder.add(renderer.settings, 'colliderRoughness', 0.0, 1.0).onChange( function() { trinity.render_dirty(); });
+
     this.rendererFolder.close();
 }
 

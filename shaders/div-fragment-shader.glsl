@@ -7,6 +7,7 @@ uniform int Nz;
 uniform int Ncol;
 uniform vec3 L; // world-space extents of grid (also the upper right corner in world space)
 uniform float dL;
+uniform float time;
 
 /////// input buffers ///////
 uniform sampler2D Vair_sampler; // 0, vec3 velocity field

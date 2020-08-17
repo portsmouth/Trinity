@@ -9,6 +9,7 @@ uniform vec3 L; // world-space extents of grid (also the upper right corner in w
 uniform float dL;
 
 // Physics
+uniform float time;
 uniform float timestep;
 
 /////// input buffers ///////
