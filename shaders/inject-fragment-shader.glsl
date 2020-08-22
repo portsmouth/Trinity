@@ -34,7 +34,7 @@ bool isSolidCell(in ivec3 vsPi)
 {
     vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
     vec3 wsP = vsP*dL;
-    return collisionSDF(wsP, L) < 0.0;
+    return collisionSDF(wsP, time, L, dL) < 0.0;
 }
 
 vec3 mapFragToVs(in ivec2 frag)
@@ -70,30 +70,32 @@ void main()
     else
     {
         // Get current velocity, temperature, and debris fields:
-        vec3  v = texelFetch(Vair_sampler, frag, 0).rgb;
-        float T = texelFetch(Tair_sampler, frag, 0).x;
+        vec3 v = texelFetch(Vair_sampler, frag, 0).rgb;
+        vec4 T = texelFetch(Tair_sampler, frag, 0);
         vec3 absorption = texelFetch(absorption_sampler, frag, 0).rgb;
         vec3 scattering = texelFetch(scattering_sampler, frag, 0).rgb;
 
         // Inject mass and modify temperature:
-        float Tinflow = 0.0;
-        vec3 vInflow          = vec3(0.0);
-        vec3 absorptionInflow = vec3(0.0);
-        vec3 scatteringInflow = vec3(0.0);
+        vec3 vInflow      = vec3(0.0);
+        vec4 Tinflow      = vec4(0.0);
+        vec3 mediumInflow = vec3(0.0);
+        vec3 mediumAlbedo = vec3(0.5);
 
-        inject(wsP, time, L,
+        inject(wsP, time, L, dL,
                v, vInflow,
                T, Tinflow,
-               absorption, absorptionInflow,
-               scattering, scatteringInflow);
+               mediumInflow, mediumAlbedo);
 
         v += vInflow * timestep;
         T += Tinflow * timestep;
-        absorption += absorptionInflow*timestep;
-        scattering += scatteringInflow*timestep;
+
+        vec3 scatteringInflow = mediumAlbedo * mediumInflow;
+        vec3 absorptionInflow = mediumInflow - scatteringInflow;
+        absorption += absorptionInflow * timestep;
+        scattering += scatteringInflow * timestep;
 
         Vair_output       = vec4(v, 0.0);
-        Tair_output       = vec4(vec3(T), 0.0);
+        Tair_output       = T;
         absorption_output = vec4(absorption, 0.0);
         scattering_output = vec4(scattering, 0.0);
     }

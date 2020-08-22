@@ -54,7 +54,7 @@ bool isSolidCell(in ivec3 vsPi)
 {
     vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
     vec3 wsP = vsP*dL;
-    return collisionSDF(wsP, L) < 0.0;
+    return collisionSDF(wsP, time, L, dL) < 0.0;
 }
 
 void main()

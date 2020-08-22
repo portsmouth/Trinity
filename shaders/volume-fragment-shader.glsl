@@ -63,8 +63,6 @@ layout(location = 1) out vec4 gbuf_rng;
 _USER_CODE_
 /////////////////////// user-defined code ///////////////////////
 
-
-#define M_PI 3.141592653589793
 #define sort2(a,b) { vec3 tmp=min(a,b); b=a+b-tmp; a=tmp; }
 #define DENOM_EPSILON 1.0e-7
 
@@ -152,7 +150,6 @@ vec3 clampToBounds(in vec3 wsP)
     return clamp(wsP, voxel, L-voxel);
 }
 
-
 ivec2 mapVsToFrag(in ivec3 vsP)
 {
     // map integer voxel space coords to the corresponding fragment coords
@@ -198,13 +195,6 @@ vec3 sun_transmittance(in vec3 pW, float stepSize, vec4 rnd)
     return Tr;
 }
 
-float phaseFunction(float mu)
-{
-    float g = anisotropy;
-    float gSqr = g*g;
-    return (1.0/(4.0*M_PI)) * (1.0 - gSqr) / pow(1.0 - 2.0*g*mu + gSqr, 1.5);
-}
-
 float _sdBox(vec3 pW, vec3 bmin, vec3 bmax)
 {
     vec3 d = abs(pW-0.5*(bmin+bmax)) - 0.5*(bmax-bmin);
@@ -214,7 +204,7 @@ float _sdBox(vec3 pW, vec3 bmin, vec3 bmax)
 float _collisionSDF(vec3 wsP)
 {
     float s = _sdBox(wsP, volMin, volMax);
-    return max(s, collisionSDF(wsP, L));
+    return max(s, collisionSDF(wsP, time, L, dL));
 }
 
 bool traceSDF(in vec3 start, in vec3 dir, float tend, float lengthScale, inout float t)
@@ -331,18 +321,19 @@ void main()
             // Compute extinction and albedo at step midpoint
             vec3 absorption = interp(absorption_sampler, clampToBounds(wsP)).rgb;
             vec3 scattering = interp(scattering_sampler, clampToBounds(wsP)).rgb;
-            vec3 extinction = (absorption + scattering);
-            vec3 sigma_t = extinction * extinctionScale;
-            vec3 albedo = scattering / max(extinction, vec3(DENOM_EPSILON));
+            vec3 mediumExtinction = (absorption + scattering);
+            vec3 mediumAlbedo = scattering / max(mediumExtinction, vec3(DENOM_EPSILON));
+            mediumRemap(mediumExtinction, mediumAlbedo);
+            mediumExtinction *= extinctionScale;
 
             // Compute in-scattered sunlight
             vec3 Li = sunPower * sunColor * sun_transmittance(pMarch, 3.0*stepSize, rnd);
-            vec3 dTr = exp(-sigma_t*dt); // transmittance over step
-            vec3 J = Li * albedo * Tr * (vec3(1.0) - dTr); // scattering term integrated over step, assuming constant Li
-            L += J * phaseFunction(dot(sunDir, rayDir));
+            vec3 dTr = exp(-mediumExtinction*dt); // transmittance over step
+            vec3 J = Li * mediumAlbedo * Tr * (vec3(1.0) - dTr); // scattering term integrated over step, assuming constant Li
+            L += J * phaseFunction(dot(sunDir, rayDir), anisotropy);
 
             // Emit radiation from hot air
-            float T = interp(Tair_sampler, clampToBounds(wsP)).r;
+            vec4 T = interp(Tair_sampler, clampToBounds(wsP));
             vec3 emission = emissionScale * temperatureToEmission(T);
             L += Tr * emission * dt;
 

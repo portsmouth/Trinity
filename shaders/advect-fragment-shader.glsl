@@ -135,7 +135,7 @@ bool isSolidCell(in ivec3 vsPi)
 {
     vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
     vec3 wsP = vsP*dL;
-    return collisionSDF(wsP, L) < 0.0;
+    return collisionSDF(wsP, time, L, dL) < 0.0;
 }
 
 void main()
@@ -160,15 +160,16 @@ void main()
         // Apply semi-Lagrangian advection
         vec3 v0 = texelFetch(Vair_sampler, frag, 0).xyz;
         vec3 wsP = vsP*dL;
-        vec3 wsPp = back_advect(wsP, v0, timestep);
-        vec3  v         = interp(Vair_sampler, wsPp).rgb;
-        float P         = interp(Pair_sampler, wsPp).x;
-        float T         = interp(Tair_sampler, wsPp).x;
-        vec3 absorption = interp(absorption_sampler, wsPp).rgb;
-        vec3 scattering = interp(scattering_sampler, wsPp).rgb;
+        vec3 wsP_back = back_advect(wsP, v0, timestep);
+        vec3 v          = interp(Vair_sampler, wsP_back).rgb;
+        float P         = interp(Pair_sampler, wsP_back).r;
+        vec4 T          = interp(Tair_sampler, wsP_back);
+        vec3 absorption = interp(absorption_sampler, wsP_back).rgb;
+        vec3 scattering = interp(scattering_sampler, wsP_back).rgb;
+        vec3 medium = absorption + scattering;
 
         // Apply external forces
-        v += timestep * externalForces(wsP, time, v, P, T, L);
+        v += timestep * externalForces(wsP, time, L, dL, v, P, T, medium);
 
         // Apply vorticity confinement:
         if (vorticity_scale > 0.0)
@@ -176,7 +177,7 @@ void main()
 
         Vair_output       = vec4(v, 0.0);
         Pair_output       = vec4(vec3(P), 0.0);
-        Tair_output       = vec4(vec3(T), 0.0);
+        Tair_output       = T;
         absorption_output = vec4(absorption, 0.0);
         scattering_output = vec4(scattering, 0.0);
     }

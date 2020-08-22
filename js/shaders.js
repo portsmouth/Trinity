@@ -138,7 +138,7 @@ bool isSolidCell(in ivec3 vsPi)
 {
     vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
     vec3 wsP = vsP*dL;
-    return collisionSDF(wsP, L) < 0.0;
+    return collisionSDF(wsP, time, L, dL) < 0.0;
 }
 
 void main()
@@ -163,15 +163,16 @@ void main()
         // Apply semi-Lagrangian advection
         vec3 v0 = texelFetch(Vair_sampler, frag, 0).xyz;
         vec3 wsP = vsP*dL;
-        vec3 wsPp = back_advect(wsP, v0, timestep);
-        vec3  v         = interp(Vair_sampler, wsPp).rgb;
-        float P         = interp(Pair_sampler, wsPp).x;
-        float T         = interp(Tair_sampler, wsPp).x;
-        vec3 absorption = interp(absorption_sampler, wsPp).rgb;
-        vec3 scattering = interp(scattering_sampler, wsPp).rgb;
+        vec3 wsP_back = back_advect(wsP, v0, timestep);
+        vec3 v          = interp(Vair_sampler, wsP_back).rgb;
+        float P         = interp(Pair_sampler, wsP_back).r;
+        vec4 T          = interp(Tair_sampler, wsP_back);
+        vec3 absorption = interp(absorption_sampler, wsP_back).rgb;
+        vec3 scattering = interp(scattering_sampler, wsP_back).rgb;
+        vec3 medium = absorption + scattering;
 
         // Apply external forces
-        v += timestep * externalForces(wsP, time, v, P, T, L);
+        v += timestep * externalForces(wsP, time, L, dL, v, P, T, medium);
 
         // Apply vorticity confinement:
         if (vorticity_scale > 0.0)
@@ -179,7 +180,7 @@ void main()
 
         Vair_output       = vec4(v, 0.0);
         Pair_output       = vec4(vec3(P), 0.0);
-        Tair_output       = vec4(vec3(T), 0.0);
+        Tair_output       = T;
         absorption_output = vec4(absorption, 0.0);
         scattering_output = vec4(scattering, 0.0);
     }
@@ -282,7 +283,7 @@ bool isSolidCell(in ivec3 vsPi)
 {
     vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
     vec3 wsP = vsP*dL;
-    return collisionSDF(wsP, L) < 0.0;
+    return collisionSDF(wsP, time, L, dL) < 0.0;
 }
 
 void main()
@@ -382,16 +383,20 @@ void main()
     ivec3 vsPi = ivec3(floor(vsP));
     vec3 wsP = vsP*dL;
 
-    vec3 v;
-    float T;
-    vec3 absorption;
-    vec3 scattering;
-    initial_conditions(wsP, L,
-                       v, T, absorption, scattering);
+    vec3 v = vec3(0.0);
+    vec4 T = vec4(0.0);
+    vec3 mediumDensity = vec3(0.0);
+    vec3 mediumAlbedo = vec3(0.0);
+    initial_conditions(wsP, L, dL,
+                       v, T,
+                       mediumDensity, mediumAlbedo);
+
+    vec3 scattering = mediumDensity * mediumAlbedo;
+    vec3 absorption = mediumDensity - scattering;
 
     Vair_output   = vec4(v, 0.0);
     Pair_output   = vec4(0.0);
-    Tair_output   = vec4(T);
+    Tair_output   = T;
     absorption_output = vec4(absorption, 0.0);
     scattering_output = vec4(scattering, 0.0);
 }
@@ -446,7 +451,7 @@ bool isSolidCell(in ivec3 vsPi)
 {
     vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
     vec3 wsP = vsP*dL;
-    return collisionSDF(wsP, L) < 0.0;
+    return collisionSDF(wsP, time, L, dL) < 0.0;
 }
 
 vec3 mapFragToVs(in ivec2 frag)
@@ -482,30 +487,32 @@ void main()
     else
     {
         // Get current velocity, temperature, and debris fields:
-        vec3  v = texelFetch(Vair_sampler, frag, 0).rgb;
-        float T = texelFetch(Tair_sampler, frag, 0).x;
+        vec3 v = texelFetch(Vair_sampler, frag, 0).rgb;
+        vec4 T = texelFetch(Tair_sampler, frag, 0);
         vec3 absorption = texelFetch(absorption_sampler, frag, 0).rgb;
         vec3 scattering = texelFetch(scattering_sampler, frag, 0).rgb;
 
         // Inject mass and modify temperature:
-        float Tinflow = 0.0;
-        vec3 vInflow          = vec3(0.0);
-        vec3 absorptionInflow = vec3(0.0);
-        vec3 scatteringInflow = vec3(0.0);
+        vec3 vInflow      = vec3(0.0);
+        vec4 Tinflow      = vec4(0.0);
+        vec3 mediumInflow = vec3(0.0);
+        vec3 mediumAlbedo = vec3(0.5);
 
-        inject(wsP, time, L,
+        inject(wsP, time, L, dL,
                v, vInflow,
                T, Tinflow,
-               absorption, absorptionInflow,
-               scattering, scatteringInflow);
+               mediumInflow, mediumAlbedo);
 
         v += vInflow * timestep;
         T += Tinflow * timestep;
-        absorption += absorptionInflow*timestep;
-        scattering += scatteringInflow*timestep;
+
+        vec3 scatteringInflow = mediumAlbedo * mediumInflow;
+        vec3 absorptionInflow = mediumInflow - scatteringInflow;
+        absorption += absorptionInflow * timestep;
+        scattering += scatteringInflow * timestep;
 
         Vair_output       = vec4(v, 0.0);
-        Tair_output       = vec4(vec3(T), 0.0);
+        Tair_output       = T;
         absorption_output = vec4(absorption, 0.0);
         scattering_output = vec4(scattering, 0.0);
     }
@@ -608,7 +615,7 @@ bool isSolidCell(in ivec3 vsPi)
 {
     vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
     vec3 wsP = vsP*dL;
-    return collisionSDF(wsP, L) < 0.0;
+    return collisionSDF(wsP, time, L, dL) < 0.0;
 }
 
 void main()
@@ -802,7 +809,7 @@ bool isSolidCell(in ivec3 vsPi)
 {
     vec3 vsP = vec3(float(vsPi.x)+0.5, float(vsPi.y)+0.5,float(vsPi.z)+0.5);
     vec3 wsP = vsP*dL;
-    return collisionSDF(wsP, L) < 0.0;
+    return collisionSDF(wsP, time, L, dL) < 0.0;
 }
 
 void main()
@@ -931,8 +938,6 @@ layout(location = 1) out vec4 gbuf_rng;
 _USER_CODE_
 /////////////////////// user-defined code ///////////////////////
 
-
-#define M_PI 3.141592653589793
 #define sort2(a,b) { vec3 tmp=min(a,b); b=a+b-tmp; a=tmp; }
 #define DENOM_EPSILON 1.0e-7
 
@@ -1020,7 +1025,6 @@ vec3 clampToBounds(in vec3 wsP)
     return clamp(wsP, voxel, L-voxel);
 }
 
-
 ivec2 mapVsToFrag(in ivec3 vsP)
 {
     // map integer voxel space coords to the corresponding fragment coords
@@ -1066,13 +1070,6 @@ vec3 sun_transmittance(in vec3 pW, float stepSize, vec4 rnd)
     return Tr;
 }
 
-float phaseFunction(float mu)
-{
-    float g = anisotropy;
-    float gSqr = g*g;
-    return (1.0/(4.0*M_PI)) * (1.0 - gSqr) / pow(1.0 - 2.0*g*mu + gSqr, 1.5);
-}
-
 float _sdBox(vec3 pW, vec3 bmin, vec3 bmax)
 {
     vec3 d = abs(pW-0.5*(bmin+bmax)) - 0.5*(bmax-bmin);
@@ -1082,7 +1079,7 @@ float _sdBox(vec3 pW, vec3 bmin, vec3 bmax)
 float _collisionSDF(vec3 wsP)
 {
     float s = _sdBox(wsP, volMin, volMax);
-    return max(s, collisionSDF(wsP, L));
+    return max(s, collisionSDF(wsP, time, L, dL));
 }
 
 bool traceSDF(in vec3 start, in vec3 dir, float tend, float lengthScale, inout float t)
@@ -1199,18 +1196,19 @@ void main()
             // Compute extinction and albedo at step midpoint
             vec3 absorption = interp(absorption_sampler, clampToBounds(wsP)).rgb;
             vec3 scattering = interp(scattering_sampler, clampToBounds(wsP)).rgb;
-            vec3 extinction = (absorption + scattering);
-            vec3 sigma_t = extinction * extinctionScale;
-            vec3 albedo = scattering / max(extinction, vec3(DENOM_EPSILON));
+            vec3 mediumExtinction = (absorption + scattering);
+            vec3 mediumAlbedo = scattering / max(mediumExtinction, vec3(DENOM_EPSILON));
+            mediumRemap(mediumExtinction, mediumAlbedo);
+            mediumExtinction *= extinctionScale;
 
             // Compute in-scattered sunlight
             vec3 Li = sunPower * sunColor * sun_transmittance(pMarch, 3.0*stepSize, rnd);
-            vec3 dTr = exp(-sigma_t*dt); // transmittance over step
-            vec3 J = Li * albedo * Tr * (vec3(1.0) - dTr); // scattering term integrated over step, assuming constant Li
-            L += J * phaseFunction(dot(sunDir, rayDir));
+            vec3 dTr = exp(-mediumExtinction*dt); // transmittance over step
+            vec3 J = Li * mediumAlbedo * Tr * (vec3(1.0) - dTr); // scattering term integrated over step, assuming constant Li
+            L += J * phaseFunction(dot(sunDir, rayDir), anisotropy);
 
             // Emit radiation from hot air
-            float T = interp(Tair_sampler, clampToBounds(wsP)).r;
+            vec4 T = interp(Tair_sampler, clampToBounds(wsP));
             vec3 emission = emissionScale * temperatureToEmission(T);
             L += Tr * emission * dt;
 

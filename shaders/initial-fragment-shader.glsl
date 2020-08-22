@@ -44,16 +44,20 @@ void main()
     ivec3 vsPi = ivec3(floor(vsP));
     vec3 wsP = vsP*dL;
 
-    vec3 v;
-    float T;
-    vec3 absorption;
-    vec3 scattering;
-    initial_conditions(wsP, L,
-                       v, T, absorption, scattering);
+    vec3 v = vec3(0.0);
+    vec4 T = vec4(0.0);
+    vec3 mediumDensity = vec3(0.0);
+    vec3 mediumAlbedo = vec3(0.0);
+    initial_conditions(wsP, L, dL,
+                       v, T,
+                       mediumDensity, mediumAlbedo);
+
+    vec3 scattering = mediumDensity * mediumAlbedo;
+    vec3 absorption = mediumDensity - scattering;
 
     Vair_output   = vec4(v, 0.0);
     Pair_output   = vec4(0.0);
-    Tair_output   = vec4(T);
+    Tair_output   = T;
     absorption_output = vec4(absorption, 0.0);
     scattering_output = vec4(scattering, 0.0);
 }
