@@ -15,7 +15,7 @@ Trinity solves the [Navier–Stokes equations](https://en.wikipedia.org/wiki/Nav
 
 Only the core simulation logic is hard-coded, while most of the dynamics is determined by user-written GLSL programs which specify the injection of velocity, application of external forces, and the presence of solid obstacles which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
 
-For rendering, two color fields representing the extinction (i.e. density) and albedo of an absorbing/scattering/emitting medium, e.g dust or ink, are injected and passively advected. These are volume rendered via raymarching, assuming a single distance light (the "sun"). The map from the temperature field to emission radiance (e.g. to simulate blackbody radiation) is provided by the user.
+For rendering, two color fields representing the extinction (i.e. density) and albedo of an absorbing/scattering/emitting medium, e.g dust or ink, are injected and passively advected. These are volume rendered via raymarching, illuminated by a single distance light (the "sun"). The map from the temperature field to emission radiance (e.g. to simulate blackbody radiation) is provided by the user.
 
 The following 6 user-written GLSL programs specify the dynamics and rendering:
 
@@ -29,8 +29,8 @@ The following 6 user-written GLSL programs specify the dynamics and rendering:
 #### Grid geometry
 
 In all programs, the variable `vec3 wsP` refers to the world space position in coordinates which range from the origin to `vec3 L`, where `L` is in units of voxels.
-For example a grid of resolution `(128, 512, 128)` has its lower left corner at `(0,0,0)` and its upper right corner at `L=(128.0, 512.0, 128.0)`.
-The center of the grid is at `L/2`. (Thus the voxel size `dL` is always equal to 1.0).
+For example a grid of resolution `(128, 512, 128)` has its lower left corner at `(0, 0, 0)` and its upper right corner at `L=(128.0, 512.0, 128.0)`.
+The center of the grid is at `L/2`.
 
 #### Technical details
 
@@ -115,15 +115,15 @@ and binding them to UI sliders and color-pickers which control them:
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // "Physics"
-uniform float gravity;          // {"name":"gravity",      	   "min":0.0, "max":1.0,    "step":0.001, "default":0.05}
-uniform float buoyancy;         // {"name":"buoyancy",         "min":0.0, "max":0.5,    "step":0.001, "default":0.5}
-uniform float radiationLoss;    // {"name":"radiationLoss",    "min":0.9, "max":1.0,    "step":0.01,  "default":0.999}
+uniform float gravity;          // {"name":"gravity",          "min":0.0, "max":1.0,   "step":0.01, "default":0.05}
+uniform float buoyancy;         // {"name":"buoyancy",         "min":0.0, "max":0.5,   "step":0.01, "default":0.5}
+uniform float radiationLoss;    // {"name":"radiationLoss",    "min":0.9, "max":1.0,   "step":0.01,  "default":0.99}
 
 // Blast geometry
-uniform float blast_height;     // {"name":"blast_height",     "min":0.1, "max":0.9,    "step":0.001, "default":0.25}
-uniform float blast_radius;     // {"name":"blast_radius",     "min":0.0, "max":0.1,    "step":0.001, "default":0.1}
-uniform float blast_velocity;   // {"name":"blast_velocity",   "min":0.0, "max":100.0,  "step":0.1,   "default":50.0}
-uniform float blast_heat_flux;  // {"name":"blast_heat_flux",  "min":0.0, "max":100.0,  "step":1.0,   "default":100.0}
+uniform float blast_height;     // {"name":"blast_height",     "min":0.1, "max":0.9,   "step":0.01, "default":0.25}
+uniform float blast_radius;     // {"name":"blast_radius",     "min":0.0, "max":0.1,   "step":0.01, "default":0.1}
+uniform float blast_velocity;   // {"name":"blast_velocity",   "min":0.0, "max":100.0, "step":0.1,  "default":50.0}
+uniform float blast_heat_flux;  // {"name":"blast_heat_flux",  "min":0.0, "max":100.0, "step":1.0,  "default":100.0}
 
 // Dust
 uniform float dust_inflow_rate; // {"name":"dust_inflow_rate", "min":0.0, "max":10.0,   "step":0.01, "default":1.0}
