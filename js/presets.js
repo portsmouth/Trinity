@@ -115,7 +115,8 @@ Presets.prototype.load_preset = function(preset_name)
         let preset = _presets_table[preset_name];
         let state = JSON.parse(preset);
         trinity.preset_selection = preset_name;
-        trinity.load_state(state);
+        return trinity.load_state(state);
     }
+    return false;
 }
 

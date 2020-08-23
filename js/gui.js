@@ -199,6 +199,10 @@ GUI.prototype.addPresetsFolder = function()
     this.presetSettings["preset"] = trinity.preset_selection;
     var presetItem = this.presetsFolder.add(this.presetSettings, 'preset', preset_names);
     presetItem.onChange(function(preset_name) { trinity.presets.load_preset(preset_name); });
+    this.presetSettings["load scene"] = function() { trinity.load_scene(); }
+    this.presetSettings["save scene"] = function() { trinity.save_scene(); }
+    this.presetsFolder.add(this.presetSettings, 'load scene');
+    this.presetsFolder.add(this.presetSettings, 'save scene');
     this.presetsFolder.open();
 }
 

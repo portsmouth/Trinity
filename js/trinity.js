@@ -111,10 +111,11 @@ var Trinity = function(editor, error_editor)
     window.addEventListener( 'click', this, false );
     window.addEventListener( 'keydown', this, false );
 
-    // Attempt to load from current URL
+    // Attempt to take preset from current URL
     if (!this.load_url(window.location.href))
     {
-        this.presets.load_preset('Basic plume');
+        // Otherwise default to one of the presets
+        this.presets.load_preset('Plume & sphere collider I');
     }
 }
 
@@ -206,21 +207,6 @@ Trinity.prototype.resetCam = function()
 // App state management
 ///////////////////////////////////////////////////////////////
 
-Trinity.prototype.getQueryParam = function(url, key)
-{
-    var queryStartPos = url.indexOf('?');
-    if (queryStartPos === -1) {
-        return null;
-    }
-    var params = url.substring(queryStartPos + 1).split('&');
-    for (var i = 0; i < params.length; i++) {
-        var pairs = params[i].split('=');
-        if (decodeURIComponent(pairs.shift()) == key) {
-        return decodeURIComponent(pairs.join('='));
-        }
-    }
-}
-
 Trinity.prototype.get_escaped_stringified_state = function(state)
 {
     let json_str = JSON.stringify(state);
@@ -231,29 +217,6 @@ Trinity.prototype.get_escaped_stringified_state = function(state)
                                     .replace(/[\r]/g, '\\r')
                                     .replace(/[\t]/g, '\\t');
     return json_str_escaped;
-}
-
-Trinity.prototype.get_stringified_state = function(state)
-{
-    let json_str = JSON.stringify(state);
-    return json_str;
-}
-
-Trinity.prototype.get_url = function()
-{
-    let state = this.get_state();
-    let objJsonStr = this.get_stringified_state(state);
-    let objJsonB64 = btoa(objJsonStr);
-
-    let URL = window.location.href;
-    var separator_index = URL.indexOf('?');
-    if (separator_index > -1)
-    {
-        URL = URL.substring(0, separator_index);
-    }
-    URL += '?settings=' + encodeURIComponent(objJsonB64);
-    history.pushState(null, '', URL);
-    return URL;
 }
 
 Trinity.prototype.get_state = function()
@@ -284,8 +247,8 @@ Trinity.prototype.get_state = function()
     }
 
     let gui_settings = { visible: this.getGUI().visible };
-    let state = { RENDERER_STATE: this.renderer.settings,
-                  SOLVER_STATE:   this.solver.settings,
+    let state = { RENDERER_STATE:   this.renderer.settings,
+                  SOLVER_STATE:     this.solver.settings,
                   SIMULATION_STATE: simulationParameters,
                   CAMERA_STATE:     camera_settings,
                   GUI_STATE:        gui_settings,
@@ -294,23 +257,86 @@ Trinity.prototype.get_state = function()
     return state;
 }
 
+Trinity.prototype.load_scene = function()
+{
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = e =>
+    {
+        let file = e.target.files[0];
+        var reader = new FileReader();
+        reader.readAsText(file,'UTF-8');
+        reader.onload = readerEvent => {
+            var file_contents = readerEvent.target.result;
+            let state = null;
+            try {
+                state = JSON.parse(file_contents);
+            } catch(e) {
+                console.log("Failed to parse JSON from file ", file.name, ": ", e);
+                return;
+            }
+            if (!this.load_state(state))
+                console.log("Failed to load scene from file ", file.name);
+            console.log("Loaded scene from file ", file.name);
+         }
+    }
+    input.click();
+}
+
+Trinity.prototype.getQueryParam = function(url, key)
+{
+    var queryStartPos = url.indexOf('?');
+    if (queryStartPos === -1) {
+        return null;
+    }
+    var params = url.substring(queryStartPos + 1).split('&');
+    for (var i = 0; i < params.length; i++) {
+        var pairs = params[i].split('=');
+        if (decodeURIComponent(pairs.shift()) == key) {
+            return decodeURIComponent(pairs.join('='));
+        }
+    }
+    return null;
+}
+
 Trinity.prototype.load_url = function(url)
 {
     let URL = url;
-    let objJsonB64 = this.getQueryParam(URL, 'settings');
-    if (!objJsonB64) return false;
+    let preset_name = this.getQueryParam(URL, 'preset');
+    preset_name = preset_name.replace(/^"|"$/g, '');
+    if (!preset_name) return false;
+    return this.presets.load_preset(preset_name);
+}
 
-    let setting_str = atob(objJsonB64);
-    if (!setting_str) return false;
-    let state = JSON.parse(setting_str);
-
-    this.load_state(state);
-    return true;
+Trinity.prototype.save_scene = function()
+{
+    let state = this.get_state();
+    let json_str = JSON.stringify(state);
+    //let objJsonStr = this.get_escaped_stringified_state(state);
+    var currentdate = new Date(); 
+    var datetime = currentdate.getDate() + "-" + (currentdate.getMonth()+1)  + "-" + currentdate.getFullYear() + "_"  
+                 + currentdate.getHours() + "-" + currentdate.getMinutes() + "-" + currentdate.getSeconds();
+    let filename = `trinity-scene-${datetime}.json`;
+    let link = document.createElement('a');
+    link.download = filename;
+    let blob = new Blob([json_str], {type: 'text/csv'});
+    link.href = URL.createObjectURL(blob);
+    let event = new MouseEvent('click');
+    link.dispatchEvent(event);link.dispatchEvent(event);
+    console.log("Saved scene to file ", file);
 }
 
 Trinity.prototype.load_state = function(state)
 {
     this.loading = true;
+
+    if (!('CAMERA_STATE'     in state)) return false;
+    if (!('GUI_STATE'        in state)) return false;
+    if (!('EDITOR_STATE'     in state)) return false;
+    if (!('RENDERER_STATE'   in state)) return false;
+    if (!('SOLVER_STATE'     in state)) return false;
+    if (!('SIMULATION_STATE' in state)) return false;
 
     // Load camera state
     let camera_settings = state.CAMERA_STATE;
@@ -377,6 +403,7 @@ Trinity.prototype.load_state = function(state)
     this.solver.restart();
 
     this.resize();
+    return true;
 }
 
 ///////////////////////////////////////////////////////////////
@@ -684,6 +711,8 @@ Trinity.prototype.onClick = function(event)
     event.preventDefault();
 }
 
+
+
 Trinity.prototype.onkeydown = function(event)
 {
     var charCode = (event.which) ? event.which : event.keyCode;
@@ -702,11 +731,14 @@ Trinity.prototype.onkeydown = function(event)
             trinity.getGUI().toggleHide();
             break;
 
-        case 79: // O key: dump JSON state to console
+        case 79: // O key: dump JSON application state to console
             if (!this.camControls.enabled || trinity.editing) break;
-            let state = this.get_state();
-            let objJsonStr = this.get_escaped_stringified_state(state);
-            console.log(objJsonStr);
+            console.log(this.get_escaped_stringified_state(this.get_state()));
+            break;
+
+        case 83: // S key: save application state to file
+            if (!this.camControls.enabled || trinity.editing) break;
+            this.save_scene();
             break;
 
         case 70: // F key: move cam to standard orientation
