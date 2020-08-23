@@ -1,61 +1,107 @@
 
 # Trinity
 
-<a href="https://portsmouth.github.io/Trinity/">Trinity</a> is a programmable WebGL 3d fluid simulator.
+<a href="https://portsmouth.github.io/Trinity/">Trinity</a> is a programmable WebGL 3D fluid simulator.
 
 <a href='https://portsmouth.github.io/Trinity/?preset="Basic plume"'><img src="./thumbs/Basic-plume.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Plume + sphere collider I"'><img src="./thumbs/Plume-sphere.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Plume + walls"'><img src="./thumbs/Plume-walls.png" width="33%"/></a>
 <a href='https://portsmouth.github.io/Trinity/?preset="Nuke III"'><img src="./thumbs/nuke.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Nuke"'><img src="./thumbs/nuke-II.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Moving fireball III"'><img src="./thumbs/fireball.png" width="33%"/></a>
 <a href='https://portsmouth.github.io/Trinity/?preset="Dust devil"'><img src="./thumbs/dust-devil.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Dye collision"'><img src="./thumbs/Dye-collision.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Vortex street"'><img src="./thumbs/vortex-street.png" width="33%"/></a>
 
-## Simulation
+## Overview
+
+### Simulation
 
 Trinity solves the Navier-Stokes equations of fluid/gas dynamics for the pressure and velocity field on a fixed size Eulerian grid.
-The dynamics is determined by user-written programs which specify the injection of velocity, application of external forces, and the presence of (static) walls which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
 
-The following 5 programs specify the dynamics:
+Only the core simulation logic is hard-coded, while most of the dynamics is determined by user-written GLSL programs which specify the injection of velocity, application of external forces, and the presence of (currently, static) walls which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
+
+The following 5 user-written GLSL programs specify the dynamics:
 
   - <a href="#common">Common</a>: declare UI sliders and color pickers, and bind them to UI. Setup common variables.
-  - <a href="#initial">Initial</a>: specify initial conditions for velocity and temperature
+  - <a href="#initial">Initial</a>: specify initial conditions for velocity, temperature and medium density and albedo.
+  - <a href="#inject">Inject</a>: inject velocity, heat or media into the simulation.
+  - <a href="#influence">Influence</a>: apply external forces (due to e.g. buoyancy, wind).
+  - <a href="#collide">Collide</a>: specify collision geometry via an SDF.
+  - <a href="#render">Render</a>: specify how temperature maps to emission, and phase-function.
 
-### Grid geometry
+#### Grid geometry
 
 In all programs, the variable `vec3 wsP` refers to the world space position in coordinates which range from the origin to `vec3 L`, where `L` is in units of voxels.
 For example a grid of resolution `(128, 512, 128)` has its lower left corner at `(0,0,0)` and its upper right corner at `L=(128.0, 512.0, 128.0)`.
-The center of the grid is at `L/2`.
+The center of the grid is at `L/2`. (Thus the voxel size `dL` is always equal to 1.0).
 
-## Rendering
+#### Technical details
+
+ - Diffusion of the advected terms, as well as fluid viscosity, is ignored (as is common in CFD for graphics).
+ - Neumann boundary conditions are applied at the edges of the grid (i.e. material flows freely out of these boundaries).
+ - As WebGL does not currently support writing to 3D textures from within fragment shaders, the 3D grid has to be represented via 2D textures.
+   This is done similarly to the ["flat 3D textures"](https://dl.acm.org/doi/10.5555/844174.844189) of Harris et al (2003).
+ - Pressure projection is rather simplistic and done via Jacobi iteration.
+
+
+### Rendering
 
 For rendering, two color fields representing the density (extinction) and albedo of an absorbing/scattering/emitting medium (e.g dust or ink) are injected and passively advected. These are volume rendered via raymarching, assuming a single distance light (the "sun"). The map from the temperature field to emission radiance (e.g. to simulate blackbody radiation) is provided by the user.
 
-### Technical details
-
- - Note that all diffusive terms such as fluid viscosity are ignored.
- - Neumann boundary conditions are applied at the edges of the grid (i.e. material flows freely out of these boundaries).
+The user-written <a href="#render">Render</a> program supplies the details of how temperature maps to emission, as well as the phase-function.
 
 
-## Solver parameters
+
+## Parameters
+
+
+### Solver parameters
+
+The fluid solver has the following parameters:
 
 - *Nx*, *Ny*, *Nz*: the voxel resolution on each axis.
-- *NprojSteps*: blah blah
-- *timestep*: blah blah
-- *max_timesteps*: blah blah
+- *NprojSteps*: the number of Jacobi iterations for the pressure projection step
+- *max_timesteps*: the maximum timestep count, after which the simulation loops
 - *vorticity_scale*: blah blah
 - *expansion*: blah blah
+- *timestep*: timestep value, normally fixed at 1.0
 
-## Renderer parameters
+### Renderer parameters
 
-- *extinctionScale*: blah blah
-- *emissionScale*: blah blah
-- *anisotropy*: blah blah
-- *exposure*: blah blah
-- *gamma*: blah blah
-- *saturation*: blah blah
-- *sunLatitude*: blah blah
-- *sunPower*: blah blah
+Volume rendering parameters:
+
+- *extinctionScale*: scale the medium density (extinction) value
+- *emissionScale*: scale the emission radiance
+- *anisotropy*: set the anisotropy of the phase-function
+- *exposure*: tonemapping exposure
+- *gamma*: tonemapping gamma
+- *saturation*: tonemapping color saturation
+- *sunLatitude*: latitude angle of directional light
+- *sunLongitude*: longitude angle of directional light
+- *sunPower*: power of directional light
+- *sunColor*: color of directional light
+- *skyColor*: color of (uniform) sky dome light
+- *Nraymarch*: number of raymarch steps
+- *max_spp*: maximum number of samples to average the jittered raymarch over
+- *spp_per_frame*: number of spp to run for each frame
+- *show_bounds*: show wireframe grid bounds
+- *colliderDiffuse*: collision SDF diffuse reflection color
+- *colliderSpec*: collision SDF specular reflection color
+- *colliderRoughness*: collision SDF specular roughness
+
+### Load/Save scene
+
+ - *save scene*: save scene out to a JSON file (filename auto-generated with a timestamp)
+ - *load scene*: load a previously saved JSON scene file
+
+### Keys
+
+  - Space bar: toggle the simulation play/pause state
+  - ESC key: restart the simulation from time 0.0
+  - F11 key: go fullscreen
+  - O key: dump JSON application state to console, used to generate new presets.
+  - F key: move camera to the standard orientation
+  - H key: toggle the menus and HUD
 
 
+## Programs
 
-The simulation is specified by the following six programs.
+The simulation is specified in detail by the following six GLSL programs (here with example implementations):
 
 ### Common
 
@@ -64,12 +110,27 @@ In this program, arbitrary numeric and color quantities which are used in other 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 // Bind UI parameters to uniforms used in the various programs
 //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// "Physics"
+uniform float gravity;                    // {"name":"gravity",      	 "min":0.0, "max":1.0,    "step":0.001, "default":0.05}
+uniform float buoyancy;                   // {"name":"buoyancy",         "min":0.0, "max":0.5,    "step":0.001, "default":0.5}
+uniform float radiationLoss;              // {"name":"radiationLoss",    "min":0.9, "max":1.0,    "step":0.01,  "default":0.999}
+
+// Blast geometry
 uniform float blast_height;               // {"name":"blast_height",     "min":0.1, "max":0.9,    "step":0.001, "default":0.25}
 uniform float blast_radius;               // {"name":"blast_radius",     "min":0.0, "max":0.1,    "step":0.001, "default":0.1}
+uniform float blast_velocity;             // {"name":"blast_velocity",   "min":0.0, "max":100.0,  "step":0.1,   "default":50.0}
+uniform float blast_heat_flux;            // {"name":"blast_heat_flux",  "min":0.0, "max":100.0,  "step":1.0,   "default":100.0}
+
+// Dust
 uniform float dust_inflow_rate;           // {"name":"dust_inflow_rate", "min":0.0, "max":10.0,   "step":0.01, "default":1.0}
 uniform vec3  dust_absorption;            // {"name":"dust_absorption",  "default":[0.5,0.5,0.5], "scale":1.0}
 uniform vec3  dust_scattering;            // {"name":"dust_scattering",  "default":[0.5,0.5,0.5], "scale":1.0}
+
+// Rendering
+uniform float TtoKelvin;                  // {"name":"TtoKelvin",        "min":0.0, "max":300.0,  "step":0.01, "default":10.0}
 ```
+
 The metadata after the `//` is a JSON object which is used to generate a uniform variable for the shader, which is "bound" to (i.e. driven by) a UI slider or color picker (depending on whether "default" is a number or array).
 ```glsl
 float Tambient;
@@ -89,7 +150,7 @@ void init()
 
 ```glsl
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-// Specify the initial conditions for the simulation, 
+// Specify the initial conditions for the simulation,
 // i.e. populate all the relevant fields (velocity, temperature, debris density/albedo) at time 0.0
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -112,6 +173,9 @@ void initial_conditions(in vec3 wsP,               // world space center of curr
 
 ### Inject
 
+Note that the simulation time starts at `0.0`, incrementing by one timestep each frame
+(looping on reaching max_timesteps).
+
 ```glsl
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 // Update the velocity, temperature via either:
@@ -125,7 +189,7 @@ void initial_conditions(in vec3 wsP,               // world space center of curr
 /******************************************************/
 
 void inject(in vec3 wsP,                 // world space center of current voxel
-            in float time,               // time
+            in float time,               // time (i.e. frame count times timestep value)
             in vec3 L, in float dL,      // world-space extents of grid, and voxel-size
             inout vec3 v,                // modify velocity in-place (defaults to no change)
             inout vec3 vInflow,          // velocity inflow rate (defaults to zero)
@@ -153,7 +217,7 @@ void inject(in vec3 wsP,                 // world space center of current voxel
     }
   	else
   	{
-        // Apply thermal relaxation due to "radiation loss" 
+        // Apply thermal relaxation due to "radiation loss"
         T.r *= radiationLoss;
     }
 }
@@ -170,7 +234,7 @@ void inject(in vec3 wsP,                 // world space center of current voxel
 /******************************************************/
 /*                 mandatory function                 */
 /******************************************************/
- 
+
 vec3 externalForces(in vec3 wsP,                       // world space center of current voxel
                     in float time,                     // time
                     in vec3 L, in float dL,            // world-space extents of grid, and voxel-size

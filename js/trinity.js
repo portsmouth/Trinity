@@ -736,11 +736,6 @@ Trinity.prototype.onkeydown = function(event)
             console.log(this.get_escaped_stringified_state(this.get_state()));
             break;
 
-        case 83: // S key: save application state to file
-            if (!this.camControls.enabled || trinity.editing) break;
-            this.save_scene();
-            break;
-
         case 70: // F key: move cam to standard orientation
             if (!this.camControls.enabled || trinity.editing) break;
             this.resetCam();

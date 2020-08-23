@@ -248,13 +248,15 @@ vec3 normalSDF(in vec3 pW, float lengthScale)
 
 vec3 colliderRadiance(in vec3 pW, in vec3 rayDir, float lengthScale, float stepSize, inout vec4 rnd)
 {
-    vec3 Li = sunPower * sunColor * sun_transmittance(pW, 3.0*stepSize, rnd); // sun radiance
     vec3 N = normalSDF(pW, lengthScale); // local SDF normal
     vec3 L = sunDir;
+    float LN = max(0.0, dot(L, N));
+    vec3 Li = sunPower * sunColor * sun_transmittance(pW, 3.0*stepSize, rnd); // sun radiance
     vec3 R = -reflect(L, N);
     vec3 V = -rayDir;
-    vec3 phong = colliderDiffuse*max(0.0, dot(L, N)) + colliderSpec*pow(max(0.0, dot(R, V)), 1.0/colliderRoughness);
-    return Li * phong;
+    vec3 phong = colliderDiffuse*LN + colliderSpec*pow(max(0.0, dot(R, V)), 1.0/colliderRoughness);
+    vec3 ambient = 0.05*colliderDiffuse;
+    return (phong*Li + ambient);
 }
 
 void main()

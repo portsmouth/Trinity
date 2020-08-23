@@ -141,8 +141,52 @@ Solver.prototype.resize = function(Nx, Ny, Nz)
     this.settings.Ny = Ny;
     this.settings.Nz = Nz;
 
+    /* The layout of a 3D texture (resolution Nx, Ny, Nz) in 2D form is as follows:
+
+      - Each y-slice of the 3D grid is dimensions Nx*Nz
+      - We arrange these y-slices as below, so there are Ncol columns and Nrow rows, where:
+
+          - Ncol = floor(W/Nx)
+          - Nrow = ceiling(Ny/Ncol)
+
+                |<------------------------      W = 16384      ------------------------>|-> iu (x fragment coord)
+                +-->i---+-------+-------+-------+-------+-------+-------+-------+-------+
+                ↓       |       |       |       |       |       |       |       |       |
+                k   0   |   1   |   2   |   3   |   4   |   5   |   6   |   7   |   8   | -- y-slice indices
+                |       |       |       |       |       |       |       |       |       |
+                +-------+-------+-------+-------+-------+-------+-------+-------+-------+
+                |       |       |       |       |       |       |       |       |       |
+                |   9   |   10  |  ...  |  ...  |  ...  |  ...  |  ...  |  ...  |  ...  |
+                |       |       |       |       |       |       |       |       |       |
+                +-------+-------+-------+-------+-------+-------+-------+-------+-------+
+                |       |       |       |       |       |       |       |       |       |
+                |  ...  | Ny-2  | Ny-1  |       |       |       |       |       |       |
+                |       |       |       |       |       |       |       |       |       |
+                +-------+-------+-------+-------+-------+-------+-------+-------+-------+
+                ↓
+                iv (y fragment coord)
+
+        - Then we have the following formulas for mapping between the fragment coords (iu, iv) in this 2D texture
+          and the voxel indices (i, j, k):
+
+            - voxel to fragment:
+
+                  row = floor(j/Ncol)
+                  col = j - row*Ncol
+                  iu = col*Nx + i
+                  iv = row*Nz + k
+
+            - fragment to voxel:
+
+                  row = floor(iv/Nz)
+                  col = floor(iu/Nx)
+                  i = iu - col*Nx
+                  j = col + row*Ncol
+                  k = iv - row*Nz
+    */
+
     let W = 16384; // maximum texture width available in WebGL2
-    let Ncol = Math.floor(W/Nx);
+    let Ncol = Math.floor(W/Nx); // the number of xz slices per row
     if (Ncol<1)
         GLU.fail("Resolution too high: Nx=", Nx);
     let Nrow = Math.ceil(Ny/Ncol);
@@ -465,6 +509,7 @@ Solver.prototype.step = function()
         this.update_program.uniformI("Ncol",          this.domain.Ncol);
         this.update_program.uniform3Fv("L",           this.domain.L);
         this.update_program.uniformF("dL",            this.domain.dL);
+        this.update_program.uniformF("time",          this.time);
         this.update_program.uniformF("timestep", this.timestep);
         this.syncUserUniforms(this.update_program);
 
