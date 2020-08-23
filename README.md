@@ -11,9 +11,9 @@
 
 ### Simulation
 
-Trinity solves the ["Navier–Stokes equations"](https://en.wikipedia.org/wiki/Navier%E2%80%93Stokes_equations) equations of fluid/gas dynamics for the pressure and velocity field on a fixed size Eulerian grid.
+Trinity solves the [Navier–Stokes equations](https://en.wikipedia.org/wiki/Navier%E2%80%93Stokes_equations) equations of fluid/gas dynamics for the pressure and velocity field on a fixed size Eulerian grid.
 
-Only the core simulation logic is hard-coded, while most of the dynamics is determined by user-written GLSL programs which specify the injection of velocity, application of external forces, and the presence of solid objects which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
+Only the core simulation logic is hard-coded, while most of the dynamics is determined by user-written GLSL programs which specify the injection of velocity, application of external forces, and the presence of solid obstacles which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
 
 The following 5 user-written GLSL programs specify the dynamics:
 
@@ -32,12 +32,12 @@ The center of the grid is at `L/2`. (Thus the voxel size `dL` is always equal to
 
 #### Technical details
 
- - Diffusion of the advected terms, as well as fluid viscosity, is ignored (as is common in CFD for graphics).
- - Neumann boundary conditions are applied at the edges of the grid (i.e. material flows freely out of these boundaries).
  - As WebGL does not currently support writing to 3D textures from within fragment shaders, the 3D grid has to be represented via 2D textures.
-   This is done similarly to the ["flat 3D textures"](https://dl.acm.org/doi/10.5555/844174.844189) of Harris et al (2003).
+   This is done similarly to the ["flat 3D textures"](https://dl.acm.org/doi/10.5555/844174.844189) of Harris et al (2003). See the comment [here](https://github.com/portsmouth/Trinity/blob/master/js/solver.js#L144) a detailed description of the scheme used.
  - Pressure projection is rather simplistic and done via Jacobi iteration.
  - Colliders are currently assumed to be static (i.e. if the SDF is time-dependent, the velocity of the walls will not be transferred to the fluid).
+ - Diffusion of the advected terms, as well as fluid viscosity, is ignored (as is common in CFD for graphics).
+ - Neumann boundary conditions are applied at the edges of the grid (i.e. material flows freely out of these boundaries).
  - Trinity is named after the code name of the ["first nuclear weapon test"](https://en.wikipedia.org/wiki/Trinity_(nuclear_test))
 
 ### Rendering
@@ -178,6 +178,8 @@ void initial_conditions(in vec3 wsP,               // world space center of curr
 
 Inject velocity, heat or media into the simulation.
 
+The temperature field `vec4 T` is in general 4 arbitrary scalar fields which are advected with the flow, which can be used to influence the dynamics in whatever fashion. (For example, one of these fields could be used to represent density of fuel, if simulating combustion). The medium density and albedo fields are "special" in the sense that they determine the absorption and scattering of the rendered media.
+
 Note that the simulation time starts at `0.0`, incrementing by one timestep each frame
 (looping on reaching max_timesteps).
 
@@ -231,7 +233,7 @@ void inject(in vec3 wsP,                 // world space center of current voxel
 
 ### Influence
 
-Apply external forces (due to e.g. buoyancy, wind).
+Apply external forces (due to e.g. buoyancy, wind), i.e. return the sum of forces to be applied at the given voxel.
 
 ```glsl
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -257,7 +259,7 @@ vec3 externalForces(in vec3 wsP,                       // world space center of 
 
 ### Collide
 
-Specify collision geometry via an SDF.
+Specify collision geometry via an SDF (that is, the volume in which the returned value is negative is taken to be in the interior of a solid obstacle).
 
 ```glsl
 //////////////////////////////////////////////////////////////////////////////////////////////////////
