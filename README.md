@@ -15,14 +15,16 @@ Trinity solves the [Navier–Stokes equations](https://en.wikipedia.org/wiki/Nav
 
 Only the core simulation logic is hard-coded, while most of the dynamics is determined by user-written GLSL programs which specify the injection of velocity, application of external forces, and the presence of solid obstacles which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
 
-The following 5 user-written GLSL programs specify the dynamics:
+For rendering, two color fields representing the extinction (i.e. density) and albedo of an absorbing/scattering/emitting medium, e.g dust or ink, are injected and passively advected. These are volume rendered via raymarching, assuming a single distance light (the "sun"). The map from the temperature field to emission radiance (e.g. to simulate blackbody radiation) is provided by the user.
+
+The following 6 user-written GLSL programs specify the dynamics and rendering:
 
   - <a href="#common">Common</a>: declare UI sliders and color pickers, and bind them to UI. Setup common variables.
   - <a href="#initial">Initial</a>: specify initial conditions for velocity, temperature and medium density and albedo.
   - <a href="#inject">Inject</a>: inject velocity, heat or media into the simulation.
   - <a href="#influence">Influence</a>: apply external forces (due to e.g. buoyancy, wind).
   - <a href="#collide">Collide</a>: specify collision geometry via an SDF.
-  - <a href="#render">Render</a>: specify how temperature maps to emission, and phase-function.
+  - <a href="#render">Render</a>: specify how temperature maps to emission, and the phase-function.
 
 #### Grid geometry
 
@@ -33,19 +35,12 @@ The center of the grid is at `L/2`. (Thus the voxel size `dL` is always equal to
 #### Technical details
 
  - As WebGL does not currently support writing to 3D textures from within fragment shaders, the 3D grid has to be represented via 2D textures.
-   This is done similarly to the ["flat 3D textures"](https://dl.acm.org/doi/10.5555/844174.844189) of Harris et al (2003). See the comment [here](https://github.com/portsmouth/Trinity/blob/master/js/solver.js#L144) a detailed description of the scheme used.
+   This is done similarly to the ["flat 3D textures"](https://dl.acm.org/doi/10.5555/844174.844189) of Harris et al (2003). See the commentary [here](https://github.com/portsmouth/Trinity/blob/master/js/solver.js#L144) for a detailed description of the scheme used.
  - Pressure projection is rather simplistic and done via Jacobi iteration.
  - Colliders are currently assumed to be static (i.e. if the SDF is time-dependent, the velocity of the walls will not be transferred to the fluid).
  - Diffusion of the advected terms, as well as fluid viscosity, is ignored (as is common in CFD for graphics).
  - Neumann boundary conditions are applied at the edges of the grid (i.e. material flows freely out of these boundaries).
  - Trinity is named after the code name of the ["first nuclear weapon test"](https://en.wikipedia.org/wiki/Trinity_(nuclear_test))
-
-### Rendering
-
-For rendering, two color fields representing the density (extinction) and albedo of an absorbing/scattering/emitting medium (e.g dust or ink) are injected and passively advected. These are volume rendered via raymarching, assuming a single distance light (the "sun"). The map from the temperature field to emission radiance (e.g. to simulate blackbody radiation) is provided by the user.
-
-The user-written <a href="#render">Render</a> program supplies the details of how temperature maps to emission, as well as the phase-function.
-
 
 
 ## Parameters
