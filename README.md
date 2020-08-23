@@ -11,9 +11,9 @@
 
 ### Simulation
 
-Trinity solves the Navier-Stokes equations of fluid/gas dynamics for the pressure and velocity field on a fixed size Eulerian grid.
+Trinity solves the ["Navier–Stokes equations"](https://en.wikipedia.org/wiki/Navier%E2%80%93Stokes_equations) equations of fluid/gas dynamics for the pressure and velocity field on a fixed size Eulerian grid.
 
-Only the core simulation logic is hard-coded, while most of the dynamics is determined by user-written GLSL programs which specify the injection of velocity, application of external forces, and the presence of (currently, static) walls which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
+Only the core simulation logic is hard-coded, while most of the dynamics is determined by user-written GLSL programs which specify the injection of velocity, application of external forces, and the presence of solid objects which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
 
 The following 5 user-written GLSL programs specify the dynamics:
 
@@ -37,7 +37,8 @@ The center of the grid is at `L/2`. (Thus the voxel size `dL` is always equal to
  - As WebGL does not currently support writing to 3D textures from within fragment shaders, the 3D grid has to be represented via 2D textures.
    This is done similarly to the ["flat 3D textures"](https://dl.acm.org/doi/10.5555/844174.844189) of Harris et al (2003).
  - Pressure projection is rather simplistic and done via Jacobi iteration.
-
+ - Colliders are currently assumed to be static (i.e. if the SDF is time-dependent, the velocity of the walls will not be transferred to the fluid).
+ - Trinity is named after the code name of the ["first nuclear weapon test"](https://en.wikipedia.org/wiki/Trinity_(nuclear_test))
 
 ### Rendering
 
@@ -104,35 +105,36 @@ Volume rendering parameters:
 The simulation is specified in detail by the following six GLSL programs (here with example implementations):
 
 ### Common
+ 
+Declare UI sliders and color pickers, and bind them to UI. Setup common variables.
 
-In this program, arbitrary numeric and color quantities which are used in other programs may be declared in the form:
 ```glsl
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 // Bind UI parameters to uniforms used in the various programs
+// The metadata after the // on each line containing a uniform declaration is a JSON object which is used to
+// generate a uniform variable for the shader, which is "bound" to (i.e. driven by) a UI slider or color picker
+// (depending on whether "default" is a number or array).
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // "Physics"
-uniform float gravity;                    // {"name":"gravity",      	 "min":0.0, "max":1.0,    "step":0.001, "default":0.05}
-uniform float buoyancy;                   // {"name":"buoyancy",         "min":0.0, "max":0.5,    "step":0.001, "default":0.5}
-uniform float radiationLoss;              // {"name":"radiationLoss",    "min":0.9, "max":1.0,    "step":0.01,  "default":0.999}
+uniform float gravity;          // {"name":"gravity",      	   "min":0.0, "max":1.0,    "step":0.001, "default":0.05}
+uniform float buoyancy;         // {"name":"buoyancy",         "min":0.0, "max":0.5,    "step":0.001, "default":0.5}
+uniform float radiationLoss;    // {"name":"radiationLoss",    "min":0.9, "max":1.0,    "step":0.01,  "default":0.999}
 
 // Blast geometry
-uniform float blast_height;               // {"name":"blast_height",     "min":0.1, "max":0.9,    "step":0.001, "default":0.25}
-uniform float blast_radius;               // {"name":"blast_radius",     "min":0.0, "max":0.1,    "step":0.001, "default":0.1}
-uniform float blast_velocity;             // {"name":"blast_velocity",   "min":0.0, "max":100.0,  "step":0.1,   "default":50.0}
-uniform float blast_heat_flux;            // {"name":"blast_heat_flux",  "min":0.0, "max":100.0,  "step":1.0,   "default":100.0}
+uniform float blast_height;     // {"name":"blast_height",     "min":0.1, "max":0.9,    "step":0.001, "default":0.25}
+uniform float blast_radius;     // {"name":"blast_radius",     "min":0.0, "max":0.1,    "step":0.001, "default":0.1}
+uniform float blast_velocity;   // {"name":"blast_velocity",   "min":0.0, "max":100.0,  "step":0.1,   "default":50.0}
+uniform float blast_heat_flux;  // {"name":"blast_heat_flux",  "min":0.0, "max":100.0,  "step":1.0,   "default":100.0}
 
 // Dust
-uniform float dust_inflow_rate;           // {"name":"dust_inflow_rate", "min":0.0, "max":10.0,   "step":0.01, "default":1.0}
-uniform vec3  dust_absorption;            // {"name":"dust_absorption",  "default":[0.5,0.5,0.5], "scale":1.0}
-uniform vec3  dust_scattering;            // {"name":"dust_scattering",  "default":[0.5,0.5,0.5], "scale":1.0}
+uniform float dust_inflow_rate; // {"name":"dust_inflow_rate", "min":0.0, "max":10.0,   "step":0.01, "default":1.0}
+uniform vec3  dust_absorption;  // {"name":"dust_absorption",  "default":[0.5,0.5,0.5], "scale":1.0}
+uniform vec3  dust_scattering;  // {"name":"dust_scattering",  "default":[0.5,0.5,0.5], "scale":1.0}
 
 // Rendering
-uniform float TtoKelvin;                  // {"name":"TtoKelvin",        "min":0.0, "max":300.0,  "step":0.01, "default":10.0}
-```
+uniform float TtoKelvin;        // {"name":"TtoKelvin",        "min":0.0, "max":300.0,  "step":0.01, "default":10.0}
 
-The metadata after the `//` is a JSON object which is used to generate a uniform variable for the shader, which is "bound" to (i.e. driven by) a UI slider or color picker (depending on whether "default" is a number or array).
-```glsl
 float Tambient;
 
 /******************************************************/
@@ -147,6 +149,7 @@ void init()
 
 ### Initial
 
+Specify initial conditions for velocity, temperature and medium density and albedo.
 
 ```glsl
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -172,6 +175,8 @@ void initial_conditions(in vec3 wsP,               // world space center of curr
 ```
 
 ### Inject
+
+Inject velocity, heat or media into the simulation.
 
 Note that the simulation time starts at `0.0`, incrementing by one timestep each frame
 (looping on reaching max_timesteps).
@@ -226,6 +231,8 @@ void inject(in vec3 wsP,                 // world space center of current voxel
 
 ### Influence
 
+Apply external forces (due to e.g. buoyancy, wind).
+
 ```glsl
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 // Apply any external forces to the fluid
@@ -250,6 +257,8 @@ vec3 externalForces(in vec3 wsP,                       // world space center of 
 
 ### Collide
 
+Specify collision geometry via an SDF.
+
 ```glsl
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 // Specify regions which contain impenetrable, static collider material
@@ -272,6 +281,8 @@ float collisionSDF(in vec3 wsP,            // world space center of current voxe
 ```
 
 ### Render
+
+Specify how temperature maps to emission, and phase-function.
 
 ```glsl
 //////////////////////////////////////////////////////////////////////////////////////////////////////
