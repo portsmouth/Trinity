@@ -9,14 +9,49 @@
 
 ## Simulation
 
-Trinity solves the Navier-Stokes equations of fluid/gas dynamics (in the zero viscosity limit).
-The simulation is Eulerian on a fixed size grid.
+Trinity solves the Navier-Stokes equations of fluid/gas dynamics for the pressure and velocity field on a fixed size Eulerian grid.
+The dynamics is determined by user-written programs which specify the injection of velocity, application of external forces, and the presence of (static) walls which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
+
+The following 5 programs specify the dynamics:
+
+  - <a href="#common">Common</a>: declare UI sliders and color pickers, and bind them to UI. Setup common variables.
+  - <a href="#initial">Initial</a>: specify initial conditions for velocity and temperature
+
+### Grid geometry
+
+In all programs, the variable `vec3 wsP` refers to the world space position in coordinates which range from the origin to `vec3 L`, where `L` is in units of voxels.
+For example a grid of resolution `(128, 512, 128)` has its lower left corner at `(0,0,0)` and its upper right corner at `L=(128.0, 512.0, 128.0)`.
+The center of the grid is at `L/2`.
+
+## Rendering
+
+For rendering, two color fields representing the density (extinction) and albedo of an absorbing/scattering/emitting medium (e.g dust or ink) are injected and passively advected. These are volume rendered via raymarching, assuming a single distance light (the "sun"). The map from the temperature field to emission radiance (e.g. to simulate blackbody radiation) is provided by the user.
+
+### Technical details
+
+ - Note that all diffusive terms such as fluid viscosity are ignored.
+ - Neumann boundary conditions are applied at the edges of the grid (i.e. material flows freely out of these boundaries).
 
 
 ## Solver parameters
 
 - *Nx*, *Ny*, *Nz*: the voxel resolution on each axis.
-- *tubeWidth*: the radius of the rendered solution tubes, relative to the box maximum extents
+- *NprojSteps*: blah blah
+- *timestep*: blah blah
+- *max_timesteps*: blah blah
+- *vorticity_scale*: blah blah
+- *expansion*: blah blah
+
+## Renderer parameters
+
+- *extinctionScale*: blah blah
+- *emissionScale*: blah blah
+- *anisotropy*: blah blah
+- *exposure*: blah blah
+- *gamma*: blah blah
+- *saturation*: blah blah
+- *sunLatitude*: blah blah
+- *sunPower*: blah blah
 
 
 
@@ -35,7 +70,7 @@ uniform float dust_inflow_rate;           // {"name":"dust_inflow_rate", "min":0
 uniform vec3  dust_absorption;            // {"name":"dust_absorption",  "default":[0.5,0.5,0.5], "scale":1.0}
 uniform vec3  dust_scattering;            // {"name":"dust_scattering",  "default":[0.5,0.5,0.5], "scale":1.0}
 ```
-The metadata after the `//` is a JSON object which is used to generate a uniform variable for the shader, driven by a UI slider or color picker (depending on whether "default" is a number or array).
+The metadata after the `//` is a JSON object which is used to generate a uniform variable for the shader, which is "bound" to (i.e. driven by) a UI slider or color picker (depending on whether "default" is a number or array).
 ```glsl
 float Tambient;
 
