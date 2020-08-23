@@ -221,10 +221,10 @@ GUI.prototype.createSolverSettings = function()
     this.solverFolder.add(this.solverFolder, 'Ny', 2, 2048).onChange(             function(Ny) { solver.resize(solver.settings.Nx, Math.floor(Ny), solver.settings.Nz); } );
     this.solverFolder.add(this.solverFolder, 'Nz', 2, 2048).onChange(             function(Nz) { solver.resize(solver.settings.Nx, solver.settings.Ny, Math.floor(Nz)); } );
     this.solverFolder.add(solver.settings, 'NprojSteps', 1, 256).onChange(         function(NprojSteps) { solver.settings.NprojSteps = Math.floor(NprojSteps); trinity.render_dirty(); } );
-    this.solverFolder.add(solver.settings, 'timestep', 0.0, 10.0).onChange(        function() { trinity.render_dirty(); } );
     this.solverFolder.add(solver.settings, 'max_timesteps', 0.0, 10000.0).onChange( function(max_timesteps) { solver.settings.max_timesteps = Math.floor(max_timesteps); trinity.render_dirty(); } );
     this.solverFolder.add(solver.settings, 'vorticity_scale', 0.0, 0.99).onChange( function() { trinity.render_dirty(); } );
-    this.solverFolder.add(solver.settings, 'expansion', 0.0, 1.0).onChange(        function() { trinity.render_dirty(); } );
+    this.solverFolder.add(solver.settings, 'expansion', 0.0, 0.05).onChange(       function() { trinity.render_dirty(); } );
+    this.solverFolder.add(solver.settings, 'timestep', 0.0, 10.0).onChange(        function() { trinity.render_dirty(); } );
 
     this.solverFolder.open();
 }

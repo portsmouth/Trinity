@@ -9,7 +9,7 @@
 
 ## Overview
 
-### Simulation
+### Simulation and Rendering
 
 Trinity solves the [Navier–Stokes equations](https://en.wikipedia.org/wiki/Navier%E2%80%93Stokes_equations) equations of fluid/gas dynamics for the pressure and velocity field on a fixed size Eulerian grid.
 
@@ -19,7 +19,7 @@ For rendering, two color fields representing the extinction (i.e. density) and a
 
 The following 6 user-written GLSL programs specify the dynamics and rendering:
 
-  - <a href="#common">Common</a>: declare UI sliders and color pickers, and bind them to UI. Setup common variables.
+  - <a href="#common">Common</a>: declare uniform float and vec3 quantities, and bind them to UI sliders and color pickers. Setup common variables.
   - <a href="#initial">Initial</a>: specify initial conditions for velocity, temperature and medium density and albedo.
   - <a href="#inject">Inject</a>: inject velocity, heat or media into the simulation.
   - <a href="#influence">Influence</a>: apply external forces (due to e.g. buoyancy, wind).
@@ -36,15 +36,17 @@ The center of the grid is at `L/2`. (Thus the voxel size `dL` is always equal to
 
  - As WebGL does not currently support writing to 3D textures from within fragment shaders, the 3D grid has to be represented via 2D textures.
    This is done similarly to the ["flat 3D textures"](https://dl.acm.org/doi/10.5555/844174.844189) of Harris et al (2003). See the commentary [here](https://github.com/portsmouth/Trinity/blob/master/js/solver.js#L144) for a detailed description of the scheme used.
- - Pressure projection is rather simplistic and done via Jacobi iteration.
+ - Pressure projection is currently rather simplistic and done via Jacobi iteration. The scheme for handling pressure projection in the presence of solid boundaries is taken from ["Real-Time Simulation and Rendering of 3D Fluids" by Crane et al](http://developer.download.nvidia.com/books/gpu_gems_3/samples/gems3_ch30.pdf).
+ - Semi-Lagrangian advection is done via a 4th order Runge-Kutta method.
  - Colliders are currently assumed to be static (i.e. if the SDF is time-dependent, the velocity of the walls will not be transferred to the fluid).
  - Diffusion of the advected terms, as well as fluid viscosity, is ignored (as is common in CFD for graphics).
- - Neumann boundary conditions are applied at the edges of the grid (i.e. material flows freely out of these boundaries).
- - Trinity is named after the code name of the ["first nuclear weapon test"](https://en.wikipedia.org/wiki/Trinity_(nuclear_test))
+ - "Neumann" boundary conditions are applied at the edges of the grid (i.e. derivatives are zero at the boundaries, so material flows out freely).
+ - Trinity is named after the code name of the [first nuclear weapon test](https://en.wikipedia.org/wiki/Trinity_(nuclear_test)).
 
 
 ## Parameters
 
+These are the hard-coded parameters of the solver and volume renderer:
 
 ### Solver parameters
 
@@ -53,8 +55,8 @@ The fluid solver has the following parameters:
 - *Nx*, *Ny*, *Nz*: the voxel resolution on each axis.
 - *NprojSteps*: the number of Jacobi iterations for the pressure projection step
 - *max_timesteps*: the maximum timestep count, after which the simulation loops
-- *vorticity_scale*: blah blah
-- *expansion*: blah blah
+- *vorticity_scale*: controls the amount of "vorticity confinement" applied, which enhances detail as the expense of simulation stability and correctness (see [Fedkiw & Stam](https://dl.acm.org/doi/10.1145/383259.383260)).
+- *expansion*: 
 - *timestep*: timestep value, normally fixed at 1.0
 
 ### Renderer parameters
@@ -100,8 +102,9 @@ Volume rendering parameters:
 The simulation is specified in detail by the following six GLSL programs (here with example implementations):
 
 ### Common
- 
-Declare UI sliders and color pickers, and bind them to UI. Setup common variables.
+
+To allow for real-time interaction with the simulation, there is a simple system for declaring "uniform" float and vec3 variables in the user-code,
+and binding them to UI sliders and color-pickers which control them:
 
 ```glsl
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -213,12 +216,12 @@ void inject(in vec3 wsP,                 // world space center of current voxel
         Tinflow.r = blast_heat_flux * radial_falloff;
 
         // Also inject absorbing/scattering "dust"
-      	vec3 dust_extinction = dust_absorption + dust_scattering;
-      	mediumInflow = dust_extinction * dust_inflow_rate * radial_falloff;
-      	mediumAlbedo = dust_scattering / dust_extinction;
+        vec3 dust_extinction = dust_absorption + dust_scattering;
+        mediumInflow = dust_extinction * dust_inflow_rate * radial_falloff;
+        mediumAlbedo = dust_scattering / dust_extinction;
     }
-  	else
-  	{
+    else
+    {
         // Apply thermal relaxation due to "radiation loss"
         T.r *= radiationLoss;
     }
@@ -272,7 +275,7 @@ float collisionSDF(in vec3 wsP,            // world space center of current voxe
                    in vec3 L, in float dL) // world-space extents of grid, and voxel-size
 {
     // Return SDF of the collider surface.
-	// (where the interior with SDF < 0.0 is a solid obstacle)
+    // (where the interior with SDF < 0.0 is a solid obstacle)
     return sdSphere(wsP, vec3(L.x/2.0, L.y/3.0, L.z/2.0), 0.5*L.x*collider_radius);
 }
 ```
@@ -290,15 +293,7 @@ Specify how temperature maps to emission, and phase-function.
 // Valid from 1000 to 40000 K (and additionally 0 for pure full white)
 vec3 colorTemperatureToRGB(const in float temperature)
 {
-  mat3 m = (temperature <= 6500.0) ? mat3(vec3(0.0, -2902.1955373783176, -8257.7997278925690),
-	                                      vec3(0.0, 1669.5803561666639, 2575.2827530017594),
-	                                      vec3(1.0, 1.3302673723350029, 1.8993753891711275)) :
-	 								 mat3(vec3(1745.0425298314172, 1216.6168361476490, -8257.7997278925690),
-   	                                      vec3(-2666.3474220535695, -2173.1012343082230, 2575.2827530017594),
-	                                      vec3(0.55995389139931482, 0.70381203140554553, 1.8993753891711275));
-  return mix(clamp(vec3(m[0] / (vec3(clamp(temperature, 1000.0, 40000.0)) + m[1]) + m[2]), vec3(0.0), vec3(1.0)),
-             vec3(1.0),
-             smoothstep(1000.0, 0.0, temperature));
+    // (implementation omitted here)
 }
 
 /******************************************************/
