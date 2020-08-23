@@ -57,7 +57,7 @@ jsSources = [
 
 lib_files = ' '.join(jsSources)
 cmd = '''
-java -jar closure-compiler/compiler.jar --js %s -O WHITESPACE_ONLY --js_output_file %s
+java -jar closure-compiler/compiler.jar --js %s  --js_output_file %s
 ''' % (lib_files, jsDestPath)
 
 os.system(cmd)

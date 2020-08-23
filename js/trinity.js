@@ -116,14 +116,6 @@ var Trinity = function(editor, error_editor)
     {
         this.presets.load_preset('Basic plume');
     }
-
-    // Do initial window resize:
-    this.resize();
-
-    // Do initial shader compilation (and start solver)
-    SOLVER.compileShaders();
-    RENDERER.compileShaders();
-    SOLVER.restart();
 }
 
 /**
@@ -384,6 +376,7 @@ Trinity.prototype.load_state = function(state)
     this.renderer.compileShaders();
     this.solver.restart();
 
+    this.resize();
 }
 
 ///////////////////////////////////////////////////////////////
