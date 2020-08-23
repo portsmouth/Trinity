@@ -115,7 +115,7 @@ var Trinity = function(editor, error_editor)
     if (!this.load_url(window.location.href))
     {
         // Otherwise default to one of the presets
-        this.presets.load_preset('Plume & sphere collider I');
+        this.presets.load_preset('Plume + sphere collider I');
     }
 }
 
@@ -304,8 +304,8 @@ Trinity.prototype.load_url = function(url)
 {
     let URL = url;
     let preset_name = this.getQueryParam(URL, 'preset');
-    preset_name = preset_name.replace(/^"|"$/g, '');
     if (!preset_name) return false;
+    preset_name = preset_name.replace(/^"|"$/g, '');
     return this.presets.load_preset(preset_name);
 }
 
