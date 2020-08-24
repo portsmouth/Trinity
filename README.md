@@ -17,7 +17,7 @@ Only the core simulation logic is hard-coded, while most of the dynamics is dete
 
 For rendering, two color fields representing the extinction (i.e. density) and albedo of an absorbing/scattering/emitting medium, such as dust or ink, are injected and passively advected. These are volume rendered via raymarching, illuminated by a single distance light (the "sun"). The map from the temperature field to emission radiance, to simulate blackbody radiation for example, is provided by the user.
 
-The following 6 user-written GLSL programs specify the dynamics and rendering:
+The following 6 user-written GLSL programs (as well as various in-built parameters of the [solver](#solver-parameters) and [renderer](#renderer-parameters)) specify the dynamics and rendering:
 
   - <a href="#common">Common</a>: declare uniform float and vec3 quantities, and bind them to UI sliders and color pickers.
   - <a href="#initial">Initial</a>: specify initial conditions for velocity, temperature and medium density and albedo.
@@ -28,7 +28,7 @@ The following 6 user-written GLSL programs specify the dynamics and rendering:
 
 #### Grid geometry
 
-The simulation is done on a fixed size Eulerian grid. 
+The simulation is done on a fixed size Eulerian grid.
 In all programs, the variable `vec3 wsP` refers to the world space position in coordinates which range from the origin to `vec3 L`, where `L` is in units of voxels.
 For example a grid of resolution `(128, 512, 128)` has its lower left corner at `(0, 0, 0)` and its upper right corner at `L=(128.0, 512.0, 128.0)`.
 The center of the grid is at `L/2`.
