@@ -15,7 +15,7 @@ Trinity is a WebGL application which solves the [Navier–Stokes equations](http
 
 Only the core simulation logic is hard-coded, while most of the dynamics is determined by user-written GLSL programs which specify the injection of fluid velocity and temperature, application of external forces, and the presence of solid obstacles which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
 
-For rendering, two color fields representing the extinction (i.e. density) and albedo of an absorbing/scattering/emitting medium, such as dust or ink, are injected and passively advected. These are volume rendered via raymarching, illuminated by a single distance light (the "sun"). The map from the temperature field to emission radiance, to simulate blackbody radiation for example, is provided by the user.
+For rendering, two color fields representing the extinction (i.e. density) and albedo of an absorbing/scattering/emitting medium, such as dust or ink, are injected and passively advected. These are volume rendered via raymarching, illuminated by a single distant light (the "sun"). The map from the temperature field to emission radiance, to simulate blackbody radiation for example, is provided by the user.
 
 The following 6 user-written GLSL programs (as well as various in-built parameters of the [solver](#solver-parameters) and [renderer](#renderer-parameters)) specify the dynamics and rendering:
 
@@ -284,8 +284,8 @@ The fluid solver has the following parameters:
 - *Nx*, *Ny*, *Nz*: the voxel resolution on each axis.
 - *NprojSteps*: the number of Jacobi iterations for the pressure projection step
 - *max_timesteps*: the maximum timestep count, after which the simulation loops
-- *vorticity_scale*: controls the amount of "vorticity confinement" applied, which enhances detail as the expense of simulation stability and correctness (see [Fedkiw & Stam](https://dl.acm.org/doi/10.1145/383259.383260)).
-- *expansion*: simulates local fluid expansion due to heating
+- *vorticity_scale*: controls the amount of "vorticity confinement" applied, which enhances detail at the expense of simulation stability and correctness (see [Fedkiw & Stam](https://dl.acm.org/doi/10.1145/383259.383260)).
+- *expansion*: simulates local fluid expansion due to heating.
 - *timestep*: timestep value, normally fixed at 1.0
 
 ### Renderer parameters
