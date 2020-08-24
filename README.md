@@ -126,6 +126,8 @@ Inject velocity, heat or media into the simulation.
 
 The temperature field `vec4 T` is in general 4 arbitrary scalar fields which are advected with the flow, which can be used to influence the dynamics in whatever fashion. (For example, one of these fields could be used to represent density of fuel, if simulating combustion). The medium density and albedo fields are "special" in the sense that they determine the absorption and scattering of the rendered media.
 
+The velocity and temperature fields may be injected either by specifying the inflow rate (i.e. supplying a "source" term), or by directly setting the value of the field (i.e like a Dirichlet boundary condition). While only the inflow version is available for the medium field (as using Dirichlet boundary conditions for medium density would be odd).
+
 Note that the simulation time starts at `0.0`, incrementing by one timestep each frame
 (looping on reaching max_timesteps).
 
@@ -252,7 +254,7 @@ vec3 colorTemperatureToRGB(const in float temperature)
 vec3 temperatureToEmission(in vec4 T)
 {
     vec3 emission = colorTemperatureToRGB(T.r * TtoKelvin) * pow(T.r/100.0, 4.0);
-  	return emission;
+    return emission;
 }
 
 // Optionally remap the medium density (extinction) and albedo
