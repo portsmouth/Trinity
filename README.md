@@ -56,7 +56,7 @@ The fluid solver has the following parameters:
 - *NprojSteps*: the number of Jacobi iterations for the pressure projection step
 - *max_timesteps*: the maximum timestep count, after which the simulation loops
 - *vorticity_scale*: controls the amount of "vorticity confinement" applied, which enhances detail as the expense of simulation stability and correctness (see [Fedkiw & Stam](https://dl.acm.org/doi/10.1145/383259.383260)).
-- *expansion*: 
+- *expansion*: simulates local fluid expansion due to heating
 - *timestep*: timestep value, normally fixed at 1.0
 
 ### Renderer parameters
