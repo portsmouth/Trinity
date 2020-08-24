@@ -1,7 +1,7 @@
 
 # Trinity
 
-<a href="https://portsmouth.github.io/Trinity/">Trinity</a> is a programmable WebGL 3D fluid simulator.
+<a href="https://portsmouth.github.io/Trinity/">Trinity</a> is a programmable WebGL (GPU) 3D fluid simulator.
 
 <a href='https://portsmouth.github.io/Trinity/?preset="Basic plume"'><img src="./thumbs/Basic-plume.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Plume + sphere collider I"'><img src="./thumbs/Plume-sphere.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Plume + walls"'><img src="./thumbs/Plume-walls.png" width="33%"/></a>
 <a href='https://portsmouth.github.io/Trinity/?preset="Nuke III"'><img src="./thumbs/nuke.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Nuke"'><img src="./thumbs/nuke-II.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Moving fireball III"'><img src="./thumbs/fireball.png" width="33%"/></a>
@@ -11,7 +11,7 @@
 
 ### Simulation and Rendering
 
-Trinity solves the [Navier–Stokes equations](https://en.wikipedia.org/wiki/Navier%E2%80%93Stokes_equations) equations of fluid/gas dynamics for the pressure and velocity field on a fixed size Eulerian grid.
+Trinity is a WebGL application which solves the [Navier–Stokes equations](https://en.wikipedia.org/wiki/Navier%E2%80%93Stokes_equations) equations of fluid/gas dynamics on GPU, and volume renders the resulting fields.
 
 Only the core simulation logic is hard-coded, while most of the dynamics is determined by user-written GLSL programs which specify the injection of fluid velocity and temperature, application of external forces, and the presence of solid obstacles which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
 
@@ -28,6 +28,7 @@ The following 6 user-written GLSL programs specify the dynamics and rendering:
 
 #### Grid geometry
 
+The simulation is done on a fixed size Eulerian grid. 
 In all programs, the variable `vec3 wsP` refers to the world space position in coordinates which range from the origin to `vec3 L`, where `L` is in units of voxels.
 For example a grid of resolution `(128, 512, 128)` has its lower left corner at `(0, 0, 0)` and its upper right corner at `L=(128.0, 512.0, 128.0)`.
 The center of the grid is at `L/2`.
