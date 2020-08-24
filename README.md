@@ -19,7 +19,7 @@ For rendering, two color fields representing the extinction (i.e. density) and a
 
 The following 6 user-written GLSL programs specify the dynamics and rendering:
 
-  - <a href="#common">Common</a>: declare uniform float and vec3 quantities, and bind them to UI sliders and color pickers. Setup common variables.
+  - <a href="#common">Common</a>: declare uniform float and vec3 quantities, and bind them to UI sliders and color pickers.
   - <a href="#initial">Initial</a>: specify initial conditions for velocity, temperature and medium density and albedo.
   - <a href="#inject">Inject</a>: inject velocity, heat or media into the simulation.
   - <a href="#influence">Influence</a>: apply external forces (due to e.g. buoyancy, wind).
@@ -37,65 +37,12 @@ The center of the grid is at `L/2`.
 
  - As WebGL does not currently support writing to 3D textures from within fragment shaders, the 3D grid has to be represented via 2D textures.
    This is done similarly to the ["flat 3D textures"](https://dl.acm.org/doi/10.5555/844174.844189) of Harris et al (2003). See the commentary [here](https://github.com/portsmouth/Trinity/blob/master/js/solver.js#L144) for a detailed description of the scheme used.
- - Pressure projection is currently rather simplistic and done via Jacobi iteration. The scheme for handling pressure projection in the presence of solid boundaries is taken from ["Real-Time Simulation and Rendering of 3D Fluids" by Crane et al](http://developer.download.nvidia.com/books/gpu_gems_3/samples/gems3_ch30.pdf).
+ - Pressure projection is currently rather simplistic and done via Jacobi iteration. The scheme for handling pressure projection in the presence of solid boundaries is taken from ["Real-Time Simulation and Rendering of 3D Fluids"](http://developer.download.nvidia.com/books/gpu_gems_3/samples/gems3_ch30.pdf) by Crane et al (2008).
  - Semi-Lagrangian advection is done via a 4th order Runge-Kutta method.
  - Colliders are currently assumed to be static (i.e. if the SDF is time-dependent, the velocity of the walls will not be transferred to the fluid).
  - Diffusion of the advected terms, as well as fluid viscosity, is ignored (as is common in CFD for graphics).
  - "Neumann" boundary conditions are applied at the edges of the grid (i.e. derivatives are zero at the boundaries, so material flows out freely).
  - Trinity is named after the code name of the [first nuclear weapon test](https://en.wikipedia.org/wiki/Trinity_(nuclear_test)).
-
-
-## Parameters
-
-These are the hard-coded parameters of the solver and volume renderer:
-
-### Solver parameters
-
-The fluid solver has the following parameters:
-
-- *Nx*, *Ny*, *Nz*: the voxel resolution on each axis.
-- *NprojSteps*: the number of Jacobi iterations for the pressure projection step
-- *max_timesteps*: the maximum timestep count, after which the simulation loops
-- *vorticity_scale*: controls the amount of "vorticity confinement" applied, which enhances detail as the expense of simulation stability and correctness (see [Fedkiw & Stam](https://dl.acm.org/doi/10.1145/383259.383260)).
-- *expansion*: simulates local fluid expansion due to heating
-- *timestep*: timestep value, normally fixed at 1.0
-
-### Renderer parameters
-
-Volume rendering parameters:
-
-- *extinctionScale*: scale the medium density (extinction) value
-- *emissionScale*: scale the emission radiance
-- *anisotropy*: set the anisotropy of the phase-function
-- *exposure*: tonemapping exposure
-- *gamma*: tonemapping gamma
-- *saturation*: tonemapping color saturation
-- *sunLatitude*: latitude angle of directional light
-- *sunLongitude*: longitude angle of directional light
-- *sunPower*: power of directional light
-- *sunColor*: color of directional light
-- *skyColor*: color of (uniform) sky dome light
-- *Nraymarch*: number of raymarch steps
-- *max_spp*: maximum number of samples to average the jittered raymarch over
-- *spp_per_frame*: number of spp to run for each frame
-- *show_bounds*: show wireframe grid bounds
-- *colliderDiffuse*: collision SDF diffuse reflection color
-- *colliderSpec*: collision SDF specular reflection color
-- *colliderRoughness*: collision SDF specular roughness
-
-### Load/Save scene
-
- - *save scene*: save scene out to a JSON file (filename auto-generated with a timestamp)
- - *load scene*: load a previously saved JSON scene file
-
-### Keys
-
-  - Space bar: toggle the simulation play/pause state
-  - ESC key: restart the simulation from time 0.0
-  - F11 key: go fullscreen
-  - O key: dump JSON application state to console, used to generate new presets.
-  - F key: move camera to the standard orientation
-  - H key: toggle the menus and HUD
 
 
 ## Programs
@@ -323,5 +270,57 @@ float phaseFunction(float mu,         // cosine of angle between incident and sc
     return (1.0/(4.0*pi)) * (1.0 - gSqr) / pow(1.0 - 2.0*g*mu + gSqr, 1.5);
 }
 ```
+
+## Parameters
+
+For reference, these are the parameters of the solver and volume renderer:
+
+### Solver parameters
+
+The fluid solver has the following parameters:
+
+- *Nx*, *Ny*, *Nz*: the voxel resolution on each axis.
+- *NprojSteps*: the number of Jacobi iterations for the pressure projection step
+- *max_timesteps*: the maximum timestep count, after which the simulation loops
+- *vorticity_scale*: controls the amount of "vorticity confinement" applied, which enhances detail as the expense of simulation stability and correctness (see [Fedkiw & Stam](https://dl.acm.org/doi/10.1145/383259.383260)).
+- *expansion*: simulates local fluid expansion due to heating
+- *timestep*: timestep value, normally fixed at 1.0
+
+### Renderer parameters
+
+Volume rendering parameters:
+
+- *extinctionScale*: scale the medium density (extinction) value
+- *emissionScale*: scale the emission radiance
+- *anisotropy*: set the anisotropy of the phase-function
+- *exposure*: tonemapping exposure
+- *gamma*: tonemapping gamma
+- *saturation*: tonemapping color saturation
+- *sunLatitude*: latitude angle of directional light
+- *sunLongitude*: longitude angle of directional light
+- *sunPower*: power of directional light
+- *sunColor*: color of directional light
+- *skyColor*: color of (uniform) sky dome light
+- *Nraymarch*: number of raymarch steps
+- *max_spp*: maximum number of samples to average the jittered raymarch over
+- *spp_per_frame*: number of spp to run for each frame
+- *show_bounds*: show wireframe grid bounds
+- *colliderDiffuse*: collision SDF diffuse reflection color
+- *colliderSpec*: collision SDF specular reflection color
+- *colliderRoughness*: collision SDF specular roughness
+
+### Load/Save scene
+
+ - *save scene*: save scene out to a JSON file (filename auto-generated with a timestamp)
+ - *load scene*: load a previously saved JSON scene file
+
+### Keys
+
+  - Space bar: toggle the simulation play/pause state
+  - ESC key: restart the simulation from time 0.0
+  - F11 key: go fullscreen
+  - O key: dump JSON application state to console, used to generate new presets.
+  - F key: move camera to the standard orientation
+  - H key: toggle the menus and HUD
 
 
