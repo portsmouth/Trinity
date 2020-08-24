@@ -13,9 +13,9 @@
 
 Trinity solves the [Navier–Stokes equations](https://en.wikipedia.org/wiki/Navier%E2%80%93Stokes_equations) equations of fluid/gas dynamics for the pressure and velocity field on a fixed size Eulerian grid.
 
-Only the core simulation logic is hard-coded, while most of the dynamics is determined by user-written GLSL programs which specify the injection of velocity, application of external forces, and the presence of solid obstacles which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
+Only the core simulation logic is hard-coded, while most of the dynamics is determined by user-written GLSL programs which specify the injection of fluid velocity and temperature, application of external forces, and the presence of solid obstacles which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
 
-For rendering, two color fields representing the extinction (i.e. density) and albedo of an absorbing/scattering/emitting medium, e.g dust or ink, are injected and passively advected. These are volume rendered via raymarching, illuminated by a single distance light (the "sun"). The map from the temperature field to emission radiance (e.g. to simulate blackbody radiation) is provided by the user.
+For rendering, two color fields representing the extinction (i.e. density) and albedo of an absorbing/scattering/emitting medium, such as dust or ink, are injected and passively advected. These are volume rendered via raymarching, illuminated by a single distance light (the "sun"). The map from the temperature field to emission radiance, to simulate blackbody radiation for example, is provided by the user.
 
 The following 6 user-written GLSL programs specify the dynamics and rendering:
 
