@@ -26,14 +26,14 @@ The following 6 user-written GLSL programs (as well as various in-built paramete
   - <a href="#collide">Collide</a>: specify collision geometry via an SDF.
   - <a href="#render">Render</a>: specify how temperature maps to emission, and the phase-function.
 
-#### Grid geometry
+### Grid geometry
 
 The simulation is done on a fixed size Eulerian grid.
 In all programs, the variable `vec3 wsP` refers to the world space position in coordinates which range from the origin to `vec3 L`, where `L` is in units of voxels.
 For example a grid of resolution `(128, 512, 128)` has its lower left corner at `(0, 0, 0)` and its upper right corner at `L=(128.0, 512.0, 128.0)`.
 The center of the grid is at `L/2`.
 
-#### Technical details
+### Technical details
 
  - As WebGL does not currently support writing to 3D textures from within fragment shaders, the 3D grid has to be represented via 2D textures.
    This is done similarly to the ["flat 3D textures"](https://dl.acm.org/doi/10.5555/844174.844189) of Harris et al (2003). See the commentary [here](https://github.com/portsmouth/Trinity/blob/master/js/solver.js#L144) for a detailed description of the scheme used.
