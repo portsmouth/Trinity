@@ -146,21 +146,24 @@ Solver.prototype.resize = function(Nx, Ny, Nz)
       - Each y-slice of the 3D grid is dimensions Nx*Nz
       - We arrange these y-slices as below, so there are Ncol columns and Nrow rows, where:
 
+          - W is set to the maximum available texture width
           - Ncol = floor(W/Nx)
           - Nrow = ceiling(Ny/Ncol)
+          - if Nrow*Nz > W, the resolution is too high to represent
 
                 |<------------------------      W = 16384      ------------------------>|-> iu (x fragment coord)
-                +-->i---+-------+-------+-------+-------+-------+-------+-------+-------+
-                ↓       |       |       |       |       |       |       |       |       |
-                k   0   |   1   |   2   |   3   |   4   |   5   |   6   |   7   |   8   | -- y-slice indices
-                |       |       |       |       |       |       |       |       |       |
-                +-------+-------+-------+-------+-------+-------+-------+-------+-------+
+                |--Nx-->|
+            ----+-->i---+-------+-------+-------+-------+-------+-------+-------+-------+
+            |   ↓       |       |       |       |       |       |       |       |       |
+            |Nz k   0   |   1   |   2   |   3   |   4   |   5   |   6   |   7   |   8   | -- y-slice indices
+            ↓   |       |       |       |       |       |       |       |       |       |
+            ----+-------+-------+-------+-------+-------+-------+-------+-------+-------+
                 |       |       |       |       |       |       |       |       |       |
                 |   9   |   10  |  ...  |  ...  |  ...  |  ...  |  ...  |  ...  |  ...  |
                 |       |       |       |       |       |       |       |       |       |
                 +-------+-------+-------+-------+-------+-------+-------+-------+-------+
                 |       |       |       |       |       |       |       |       |       |
-                |  ...  | Ny-2  | Ny-1  |       |       |       |       |       |       |
+                |  ...  | Ny-2  | Ny-1  |(empty)|(empty)|(empty)|(empty)|(empty)|(empty)|
                 |       |       |       |       |       |       |       |       |       |
                 +-------+-------+-------+-------+-------+-------+-------+-------+-------+
                 ↓
@@ -185,7 +188,8 @@ Solver.prototype.resize = function(Nx, Ny, Nz)
                   k = iv - row*Nz
     */
 
-    let W = 16384; // maximum texture width available in WebGL2
+    let gl = GLU.gl;
+    W = gl.getParameter(gl.MAX_TEXTURE_SIZE); // maximum texture width available in WebGL2
     let Ncol = Math.floor(W/Nx); // the number of xz slices per row
     if (Ncol<1)
         GLU.fail("Resolution too high: Nx=", Nx);
