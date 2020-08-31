@@ -288,7 +288,7 @@ GUI.prototype.createRendererSettings = function()
                         } );
 
     this.rendererFolder.add(renderer.settings, 'Nraymarch', 8, 1024).onChange(       function(Nraymarch)     { renderer.settings.Nraymarch     = Math.floor(Nraymarch);     trinity.render_dirty(); });
-    this.rendererFolder.add(renderer.settings, 'max_spp', 1, 256).onChange(           function(max_spp)       { renderer.settings.max_spp       = Math.floor(max_spp);       trinity.render_dirty(); });
+    this.rendererFolder.add(renderer.settings, 'max_spp', 1, 1024).onChange(           function(max_spp)       { renderer.settings.max_spp       = Math.floor(max_spp);       trinity.render_dirty(); });
     this.rendererFolder.add(renderer.settings, 'spp_per_frame', 1, 8).onChange(       function(spp_per_frame) { renderer.settings.spp_per_frame = Math.floor(spp_per_frame); trinity.render_dirty(); });
     this.rendererFolder.add(renderer.settings, 'show_bounds').onChange(               function() { trinity.render_dirty(); });
 

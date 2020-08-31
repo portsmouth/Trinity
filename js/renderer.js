@@ -11,7 +11,7 @@ var Renderer = function()
     // Raymarch resolution
     this.settings.Nraymarch = 100;
     this.settings.spp_per_frame = 1;
-    this.settings.max_spp = 32;
+    this.settings.max_spp = 256;
     this.spp = 0;
 
     // Bounds

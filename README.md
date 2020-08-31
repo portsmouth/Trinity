@@ -324,5 +324,6 @@ Volume rendering parameters:
   - O key: dump JSON application state to console, used to generate new presets.
   - F key: move camera to the standard orientation
   - H key: toggle the menus and HUD
+  - P key: export current framebuffer to PNG image
 
 

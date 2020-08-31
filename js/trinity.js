@@ -750,6 +750,22 @@ Trinity.prototype.onkeydown = function(event)
             this.restartSim();
             break;
 
+        case 80: // P key: save current image to disk
+        {
+            var currentdate = new Date(); 
+            var datetime = currentdate.getDate() + "-" + (currentdate.getMonth()+1)  + "-" + currentdate.getFullYear() + "_"  
+                            + currentdate.getHours() + "-" + currentdate.getMinutes() + "-" + currentdate.getSeconds();
+            let filename = `trinity-screenshot-${datetime}.png`;
+            let link = document.createElement('a');
+            link.download = filename;
+            this.render_canvas.toBlob(function(blob){
+                    link.href = URL.createObjectURL(blob);
+                    var event = new MouseEvent('click');
+                    link.dispatchEvent(event);
+                },'image/png', 1);
+            break;
+        }
+
     }
 }
 
