@@ -25,6 +25,8 @@ The following 6 user-written GLSL programs (as well as various in-built paramete
   - <a href="#influence">Influence</a>: apply external forces (due to e.g. buoyancy, wind).
   - <a href="#collide">Collide</a>: specify collision geometry via an SDF.
   - <a href="#render">Render</a>: specify how temperature maps to emission, and the phase-function.
+  
+The programs and full state of the UI can be  [saved/loaded](#Load/Save-scene) as a JSON file.
 
 ### Grid geometry
 
