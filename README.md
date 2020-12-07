@@ -1,7 +1,7 @@
 
 # Trinity
 
-<a href="https://portsmouth.github.io/Trinity/">Trinity</a> is a programmable 3D GPU (WebGL) fluid simulator.
+<a href="https://portsmouth.github.io/Trinity/">Trinity</a> is a programmable 3D GPU (WebGL) fluid simulator. The fluid simulation logic is fully customizable via GLSL programs coded directly into the browser (via [CodeMirror](https://codemirror.net)). 
 
 <a href='https://portsmouth.github.io/Trinity/?preset="Basic plume"'><img src="./thumbs/Basic-plume.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Plume + sphere collider I"'><img src="./thumbs/Plume-sphere.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Plume + walls"'><img src="./thumbs/Plume-walls.png" width="33%"/></a>
 <a href='https://portsmouth.github.io/Trinity/?preset="Nuke III"'><img src="./thumbs/nuke.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Nuke"'><img src="./thumbs/nuke-II.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Moving fireball III"'><img src="./thumbs/fireball.png" width="33%"/></a>
@@ -11,9 +11,9 @@
 
 ### Simulation and Rendering
 
-Trinity is a WebGL application which solves the [Navier–Stokes equations](https://en.wikipedia.org/wiki/Navier%E2%80%93Stokes_equations) of fluid/gas dynamics on GPU, and volume renders the resulting fields.
+Trinity is a WebGL application which solves the [Navier–Stokes equations](https://en.wikipedia.org/wiki/Navier%E2%80%93Stokes_equations) of fluid/gas dynamics on GPU, and volume renders the resulting fields. 
 
-Only the core simulation logic is hard-coded, while most of the dynamics is determined by user-written GLSL programs which specify the injection of fluid velocity and temperature, application of external forces, and the presence of solid obstacles which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
+Only the core simulation logic is hard-coded, while most of the dynamics is determined by user-written GLSL programs (written in the browser) which specify the injection of fluid velocity and temperature, application of external forces, and the presence of solid obstacles which the fluid collides with. Hot fluid is simulated by injection of a scalar field representing temperature, which is then passively advected and made to affect the dynamics according to buoyancy forces. In general, up to four scalar fields (collectively referred to as "the temperature") may be passively advected and used to drive the dynamics.
 
 For rendering, two color fields representing the extinction (i.e. density) and albedo of an absorbing/scattering/emitting medium, such as dust or ink, are injected and passively advected. These are volume rendered via raymarching, illuminated by a single distant light (the "sun"). The map from the temperature field to emission radiance, to simulate blackbody radiation for example, is provided by the user.
 
