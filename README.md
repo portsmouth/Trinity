@@ -26,7 +26,7 @@ The following 6 user-written GLSL programs (as well as various in-built paramete
   - <a href="#collide">Collide</a>: specify collision geometry via an SDF.
   - <a href="#render">Render</a>: specify how temperature maps to emission, and the phase-function.
   
-The programs and full state of the UI can be  [saved/loaded](#Load/Save-scene) as a JSON file.
+The programs and full state of the UI can be  [saved/loaded](#Saving-and-loading-the-scene) as a JSON file.
 
 ### Grid geometry
 
@@ -313,7 +313,7 @@ Volume rendering parameters:
 - *colliderSpec*: collision SDF specular reflection color
 - *colliderRoughness*: collision SDF specular roughness
 
-### Load/Save scene
+### Saving and loading the scene
 
  - *save scene*: save scene out to a JSON file (filename auto-generated with a timestamp)
  - *load scene*: load a previously saved JSON scene file
