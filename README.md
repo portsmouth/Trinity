@@ -1,7 +1,7 @@
 
 # Trinity
 
-<a href="https://portsmouth.github.io/Trinity/">Trinity</a> is a programmable 3D GPU (WebGL) fluid simulator. The fluid simulation logic is fully customizable via GLSL programs coded directly into the browser (via [CodeMirror](https://codemirror.net)). Click the thumbnails below for a selection of the preset simulations, running live in the browser:
+<a href="https://portsmouth.github.io/Trinity/">Trinity</a> is a programmable 3D GPU (WebGL) fluid simulator. The fluid simulation logic is fully customizable via GLSL programs coded directly into the browser (using [CodeMirror](https://codemirror.net)). Click the thumbnails below for a selection of the preset simulations, running live in the browser:
 
 <a href='https://portsmouth.github.io/Trinity/?preset="Basic plume"'><img src="./thumbs/Basic-plume.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Plume + sphere collider I"'><img src="./thumbs/Plume-sphere.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Plume + walls"'><img src="./thumbs/Plume-walls.png" width="33%"/></a>
 <a href='https://portsmouth.github.io/Trinity/?preset="Nuke III"'><img src="./thumbs/nuke.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Nuke"'><img src="./thumbs/nuke-II.png" width="33%"/></a><a href='https://portsmouth.github.io/Trinity/?preset="Moving fireball III"'><img src="./thumbs/fireball.png" width="33%"/></a>
