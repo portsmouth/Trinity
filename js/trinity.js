@@ -324,7 +324,7 @@ Trinity.prototype.save_scene = function()
     link.href = URL.createObjectURL(blob);
     let event = new MouseEvent('click');
     link.dispatchEvent(event);link.dispatchEvent(event);
-    console.log("Saved scene to file ", file);
+    console.log("Saved scene to file ", filename);
 }
 
 Trinity.prototype.load_state = function(state)
